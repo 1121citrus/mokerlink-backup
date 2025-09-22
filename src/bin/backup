@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+
+# An application specific service to create pfSense backups and copy them off site.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# ~/.env is how the startup encodes arguments to be accessed by this command in cron job
+ENV=${ENV:-${HOME:-/root}/.env}
+# shellcheck disable=SC1090
+[[ -r "${ENV}" ]] && source "${ENV}"
+
+set -o errexit -o errtrace -o nounset -o pipefail
+set +o xtrace +o verbose
+is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+
+command=$(basename "${0}")
+bindir=$(readlink -f $(dirname "${0}"))
+export __HA_BASH_BASE__COMMAND="${command}"
+timestamp=$(date +%Y%m%dT%H%M%S)
+
+# Create a work directory -- to cleanup any debris
+workdir=$(mktemp -d)
+# shellcheck disable=SC2329
+cleanup() {
+    rm -rf "${workdir}" >/dev/null 2>&1 || true
+}
+trap 'cleanup' EXIT
+cd "${workdir}"
+
+export AWS_CONFIG_FILE="${AWS_CONFIG_FILE:=/run/secrets/aws-config}"
+
+bucket="${AWS_S3_BUCKET_NAME:=}"
+[[ -n "${bucket}" ]] || error 'need AWS_S3_BUCKET_NAME'
+dryrun="${AWS_DRYRUN:=false}"
+host="${MOKERLINK_HOST:=${TAILSCALE_HOST:=}}"
+[[ -n "${host}" ]] || error 'need MOKERLINK_HOST or TAILSCALE_HOST'
+user="${MOKERLINK_USER:=remote-backup}"
+password=
+if [[ -n "${MOKERLINK_PASSWORD:=}" ]]; then
+    password="${MOKERLINK_PASSWORD}"
+elif [[ -r "${MOKERLINK_PASSWORD_FILE:=/run/secrets/mokerlink-password}" ]]; then
+    password=$(cat "${MOKERLINK_PASSWORD_FILE}")
+fi
+[[ -n "${password}" ]] || error 'need MOKERLINK_PASSWORD or MOKERLINK_PASSWORD_FILE (default: /run/secrets/mokerlink-password)'
+
+gpg_encrypt=false
+gpg_args="--symmetric --cipher-algo ${GPG_CIPHER_ALGO:=aes256} --batch"
+if [[ -n "${GPG_PASSPHRASE:=}" ]]; then
+    gpg_args="${gpg_args} --passphrase ${GPG_PASSPHRASE}"
+    gpg_encrypt=true
+elif [[ -r "${GPG_PASSPHRASE_FILE:=/run/secrets/gpg-passphrase}" ]]; then
+    gpg_args="${gpg_args} --passphrase-file ${GPG_PASSPHRASE_FILE}"
+    gpg_encrypt=true
+fi
+
+info "begin ${command}"
+
+for config in "running" "startup" "backup"; do
+    info "download '${config}' configuration from '${host}'"
+    config_tmp=$(mktemp)
+    bash "${bindir}/get-config" "${config}" "${host}" "${user}" "${password}" >> "${config_tmp}"
+    version=$(grep -m1 '^! System Version: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g' | sed 's/^v//g')
+    is-true "${DEBUG}" && debug "version='$version'"
+    [[ -n "${version}" ]] || error 'invalid Mokerlink configuration file - missing version'
+    hostname=$(grep -m1 '^! System Name: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g')
+    is-true "${DEBUG}" && debug "hostname='$hostname'"
+    [[ -n "${hostname}" ]] || error 'invalid Mokerlink configuration file - missing hostname'
+    backup_file="${timestamp}-${hostname}-mokerlink-${version}-${config}-config-backup.xml"
+    is-true "${DEBUG}" && debug "backup_file='$backup_file'"
+    # Add header to pulled XML file
+    (echo 'SYSTEM CONFIG FILE ::= BEGIN' && \
+     echo "! Backup: ${backup_file}" >> "${backup_file}" && \
+     tail -n +2 "${config_tmp}") > "${backup_file}"
+    info "completed download of '${config}' configuration from '${host}'"
+done
+backup_file="${timestamp}-${hostname}-mokerlink-${version}-config-backup.tar"
+shafile="${backup_file}.sha1"
+tar -cf - . 2>/dev/null | tee  "${backup_file}" | sha1sum "${backup_file}" > "${shafile}"
+output_file="${backup_file}"
+
+case "${COMPRESSION:=none}" in
+    bzip | bzip2)
+        info "compressing backup with bzip2: ${output_file}.bz2"
+        bzip2 -9 --keep --quiet --stdout  <"${output_file}" >"${output_file}.bz2"
+        output_file="${output_file}.bz2"
+        ;;
+ 
+    bzip3)
+        info "compressing backup with bzip3: ${output_file}.bz3"
+        bzip3 --batch --keep --stdout "${output_file}" >"${output_file}.bz3"
+        output_file="${output_file}.bz3"
+        ;;
+ 
+    gz | gzip)
+        info "compressing backup with gzip --best --no-name --quiet --synchronous: ${output_file}.gz"
+        gzip --best --no-name --quiet --synchronous <"${output_file}" >"${output_file}.gz"
+        output_file="${output_file}.gz"
+        ;;
+
+    lzo | lzop)
+        info "compressing backup with lzop: ${output_file}.lzo"
+        lzop <"${output_file}" >"${output_file}.lzo"
+        output_file="${output_file}.lzo"
+        ;;
+
+    none)
+        true
+        ;;
+
+    lzma | xz)
+        info "compressing backup with lzma/xz --compress --extreme --quiet: ${output_file}.xz"
+        xz --compress --extreme --quiet <"${output_file}" >"${output_file}.xz"
+        output_file="${output_file}.xz"
+        ;;
+
+    pigz)
+        info "compressing backup with pigz --best --no-name --quiet --synchronous: ${output_file}.pgz"
+        pigz --best --no-name --quiet --synchronous <"${output_file}" >"${output_file}.pgz"
+        output_file="${output_file}.pgz"
+        ;;
+
+    pixz)
+        info "compressing backup with pixz -9 -t: ${output_file}.pxz"
+        pixz -9 -t <"${output_file}" >"${output_file}.pxz"
+        output_file="${output_file}.pxz"
+        ;;
+
+    zip)
+        info "compressing backup with zip -q -9: ${output_file}.zip"
+        zip -q -9 <"${output_file}" >"${output_file}.zip"
+        output_file="${output_file}.zip"
+        ;;
+
+    *)
+        error "unknown compression algrorithm: '${COMPRESSION}'"
+        ;;
+esac
+
+if "${gpg_encrypt}"; then
+    info "encrypting backup with 'gpg' (GnuPG)"
+    # shellcheck disable=SC2086
+    gpg ${gpg_args} --output "${output_file}.gpg" "${output_file}"
+    output_file="${output_file}.gpg"
+fi
+
+info "downloaded '${backup_file}' to '${output_file}'"
+
+awsargs=--no-progress
+is_true "${dryrun}" && awsargs="${awsargs} --dryrun"
+
+info "begin mv '${output_file}' to S3 bucket '${bucket}'"
+uri="s3://${bucket}/${output_file}"
+shauri="s3://${bucket}/${shafile}"
+info "running aws s3 mv ${awsargs} '${output_file}' '${shafile}' ${uri}"
+# shellcheck disable=SC2086
+(aws s3 mv ${awsargs} "${output_file}" "${uri}" || \
+    (error "aws s3 mv '${output_file}' exited with status ${?}" || true)) 2>&1 | info
+# shellcheck disable=SC2086
+(aws s3 mv ${awsargs} "${shafile}" "${shauri}" || \
+    (error "aws s3 mv '${output_file}' exited with status ${?}" || true)) 2>&1 | info
+info "completed aws s3 mv ${awsargs} ${output_file} ${shafile} ${shauri}"
+info "finish ${command}"
+exit 0
+

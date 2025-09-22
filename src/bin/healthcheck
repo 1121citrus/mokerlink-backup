@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+
+# An application specific service to rename Home Assistant backups and copy them off site.
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# shellcheck disable=SC1090
+ENV=${ENV:-${HOME:-/root}/.env}
+[[ -r "${ENV}" ]] && source "${ENV}"
+
+set -o errexit -o errtrace -o nounset -o pipefail
+is_true "${DEBUG:-false}" && set -o xtrace -o verbose
+
+function has_cronjob_run() {
+    # FIXME -- See https://github.com/dragonmantank/cron-expression $cron->getPreviousRunDate()
+    # Compare with a timestamp file to see if it ran as expected
+    true
+}
+
+function is_crond_running() {
+    # shellcheck disable=SC2009
+    if (ps aux | grep -iq crond); then
+        true || info crond is running
+    else
+        error crond is not running
+    fi
+}
+
+function is_crontab_configured() {
+    if (crontab -l | grep -q ' /usr/local/bin/backup 2>&1'); then
+        true || info crontab is configured
+    else
+        error crontab is not configured
+    fi
+}
+
+function is_healthy() {
+    is_crontab_configured && is_crond_running && has_cronjob_run
+}
+
+is_healthy || exit 1
+

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+
+# An application specific service to rename Home Assistant backups and copy them off site.
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+set -o errexit -o errtrace -o nounset -o pipefail
+if is_true "${DEBUG:-false}"; then set -o xtrace -o verbose; fi
+
+ENV=${ENV:-${HOME:-/root}/.env}
+# shellcheck disable=SC1090
+[[ -r "${ENV}" ]] && source "${ENV}"
+
+# Write cronjob env to file, fill in sensible defaults, and read them back in
+cat <<EOF >"${ENV}"
+export AWS_CONFIG_FILE='${AWS_CONFIG_FILE:-/run/secrets/aws-config}'
+export AWS_DRYRUN='${AWS_DRYRUN:-false}'
+export AWS_S3_BUCKET_NAME='${AWS_S3_BUCKET_NAME:?Need bucket}'
+export COMPRESSION='${COMPRESSION:-none}'
+export CRON_EXPRESSION='${CRON_EXPRESSION:-@daily}'
+export DEBUG='${DEBUG:-false}'
+export GPG_CIPHER_ALGO='${GPG_CIPHER_ALGO:-aes256}'
+export GPG_PASSPHRASE='${GPG_PASSPHRASE:-}'
+export GPG_PASSPHRASE_FILE='${GPG_PASSPHRASE_FILE:-/run/secrets/gpg-passphrase}'
+export MOKERLINK_HOST='${MOKERLINK_HOST:-}'
+export MOKERLINK_PASSWORD='${MOKERLINK_PASSWORD:-}'
+export MOKERLINK_PASSWORD_FILE='${MOKERLINK_PASSWORD_FILE:-/run/secrets/mokerlink-password}'
+export MOKERLINK_USER='${MOKERLINK_USER:-remote-backup}'
+export TAILSCALE_HOST='${TAILSCALE_HOST:-}'
+export TZ='${TZ:-UTC}'
+EOF
+clean-credentials() {
+    sed -E 's/(GPG_PASSPHRASE|MOKERLINK_PASSWORD)='"'"'.*'"'"'$/\1='"'**REDACTED**'"'/' 
+}
+info "create env file ${ENV}"
+touch "${ENV}" && chmod -c 0600 "${ENV}" | info
+cat "${ENV}" | clean-credentials | info
+# shellcheck disable=SC1090
+source "${ENV}"
+
+# Add our cron entry, and direct stdout & stderr to Docker commands stdout
+COMMAND=${COMMAND:-${__1121CITRUS_BIN_DIR}/backup}
+info "installing cron.d entry: ${COMMAND}"
+(mkdir -pv /var/spool/cron/crontabs && chmod -c 0755 /var/spool/cron/crontabs) | info
+echo "${CRON_EXPRESSION} ${COMMAND} 2>&1" > /var/spool/cron/crontabs/root && chmod -c 0600 /var/spool/cron/crontabs/root | info
+info "crontab: $(cat /var/spool/cron/crontabs/root)"
+
+info "handing the reins over to cron daemon"
+crond -l 2 -f
