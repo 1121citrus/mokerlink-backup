@@ -10,7 +10,7 @@ An application specific service to create [Mokerlink managed network switch](htt
 - [Example: backup periodically as cron job](#example-backup-periodically-as-cron-job)
   - [Example Log Output](#example-log-output)
 - [Example: Run "One Off" Backup](#example-run-one-off-backup)
-  - [Example Log Output](#example-log-output)
+- [Example: Fetch running, startup or backup configurations](#example-fetch-running-startup-or-backup-configurations)
 - [Example: Docker compose file](#example-docker-compose-file)
 - [Configuration](#configuration)
 - [Building](#building)
@@ -94,9 +94,9 @@ Verify the backup:
 ```console
 $ aws s3 cp s3://backups-bucket/20250922T161500-switch--mokerlink-1.0.0.27-config-backup.tar.sha1 -
 abcb223c64e4b2206a34db069c6bb5ac7949d719  20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar
-$ aws s3 cp --quiet s3://test.backups.switch/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - |  gpg --passphrase-file ../1121-citrus/home-assistant/secrets/gpg-passphrase --decrypt --batch --quiet| bunzip2 | sha1sum
+$ aws s3 cp --quiet s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - |  gpg --passphrase-file ../1121-citrus/home-assistant/secrets/gpg-passphrase --decrypt --batch --quiet| bunzip2 | sha1sum
 abcb223c64e4b2206a34db069c6bb5ac7949d719  -
-$ aws s3 cp --quiet s3://test.backups.switch/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - |  gpg --passphrase-file ../1121-citrus/home-assistant/secrets/gpg-passphrase --decrypt --batch --quiet| bunzip2 | tar -tf -
+$ aws s3 cp --quiet s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - |  gpg --passphrase-file ../1121-citrus/home-assistant/secrets/gpg-passphrase --decrypt --batch --quiet| bunzip2 | tar -tf -
 ./
 ./20250922T161500-switch-mokerlink-1.0.0.27-running-config-backup.xml
 ./20250922T161500-switch-mokerlink-1.0.0.27-startup-config-backup.xml
@@ -152,12 +152,11 @@ ip dhcp
     .
 ```
 
-The command take three arguments:
+The commands take three arguments:
 
-1. `hostname`, defaults to the value of the `MOKERLINK_HOST` or `TAILSCALE_HOST` environment variables
+1. `hostname`, defaults to the value of the `MOKERLINK_HOST` or `TAILSCALE_HOST` environment variables, if supplied
 1. `username`, defaults to the value of the `MOKERLINK_USER` environment variable or `remote-backup`
 1. `password`, defaults to the value of the `MOKERLINK_PASSWORD` or `MOKERLINK_PASSWORD_FILE` environment variable
-
  
 ## Example: Docker compose file
 
@@ -203,8 +202,8 @@ Variable | Default | Notes
 `GPG_CIPHER_ALGO` | `aes256` | GnuPG symmetric encryption cipher to use to encrypt the backup.
 `GPG_PASSPHRASE` | _none_ | GnuPG symmetric encryption pass-phrase to use to encrypt the backup.  WARNING: consider using the more secure `GPG_PASSPHRASE_FILE`, which might be a bind mount or a compose secret.
 `GPG_PASSPHRASE_FILE` | `/run/secrets/gpg-passphrase` | A file containing the symmetric encryption pass-phrase to use to encrypt the backup. This is intended to be a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/) but could also be a bind mount.
-`MOKERLINK_HOST` | `${TAILSCALE_HOST}` | Specify the hostname or IP address of the Mokerlink managed network switch. Do not include the final `/`, otherwise backup will fail.
-`MOKERLINK_PASSWORD` | _none_ | The password to unlock the identity file. WARNING: consider using the more secure `MOKERLINK_PASSWORD_FILE`, which might be a bind mount or a compose secret.
+`MOKERLINK_HOST` | `${TAILSCALE_HOST}` | Specify the hostname or IP address of the Mokerlink managed network switch. Do not include the final `/`, otherwise backup will fail. Note that the definition of `MOKERLINK_HOST` overrides any `TAILSCALE_HOST` definition.
+`MOKERLINK_PASSWORD` | _none_ | The password to unlock the identity file. WARNING: consider using the more secure `MOKERLINK_PASSWORD_FILE`, which might be a bind mount or a compose secret. Note that the definition of `MOKERLINK_PASSWORD` overrides any `MOKERLINK_PASSWORD_FILE` definition.
 `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` | A file containing the password to unlock the identity file. This is intended to be a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/) but could also be a bind mount.
 `MOKERLINK_USER` | `remote-backup` | The username to use to access the Mokerlink managed network switch.
 `TAILSCALE_HOST` | _see notes_ | Specify the hostname or IP address of the Mokerlink managed network switch on the Tailscale mesh. Do not include the final `/`, otherwise backup will fail. Defaults to the gateway IP address if it's a private address.
