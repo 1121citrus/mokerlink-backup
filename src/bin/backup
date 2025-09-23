@@ -17,18 +17,20 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# ~/.env is how the startup encodes arguments to be accessed by this command in cron job
+command=$(basename "${0}")
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1091
+source /usr/local/include/bash/common-functions
+
 ENV=${ENV:-${HOME:-/root}/.env}
 # shellcheck disable=SC1090
 [[ -r "${ENV}" ]] && source "${ENV}"
 
 set -o errexit -o errtrace -o nounset -o pipefail
-set +o xtrace +o verbose
 is_true "${DEBUG:=false}" && set -o xtrace -o verbose
 
-command=$(basename "${0}")
-bindir=$(readlink -f $(dirname "${0}"))
-export __HA_BASH_BASE__COMMAND="${command}"
 timestamp=$(date +%Y%m%dT%H%M%S)
 
 # Create a work directory -- to cleanup any debris
@@ -73,13 +75,13 @@ for config in "running" "startup" "backup"; do
     config_tmp=$(mktemp)
     bash "${bindir}/get-config" "${config}" "${host}" "${user}" "${password}" >> "${config_tmp}"
     version=$(grep -m1 '^! System Version: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g' | sed 's/^v//g')
-    is-true "${DEBUG}" && debug "version='$version'"
+    is_true "${DEBUG}" && debug "version='$version'"
     [[ -n "${version}" ]] || error 'invalid Mokerlink configuration file - missing version'
     hostname=$(grep -m1 '^! System Name: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g')
-    is-true "${DEBUG}" && debug "hostname='$hostname'"
+    is_true "${DEBUG}" && debug "hostname='$hostname'"
     [[ -n "${hostname}" ]] || error 'invalid Mokerlink configuration file - missing hostname'
     backup_file="${timestamp}-${hostname}-mokerlink-${version}-${config}-config-backup.xml"
-    is-true "${DEBUG}" && debug "backup_file='$backup_file'"
+    is_true "${DEBUG}" && debug "backup_file='$backup_file'"
     # Add header to pulled XML file
     (echo 'SYSTEM CONFIG FILE ::= BEGIN' && \
      echo "! Backup: ${backup_file}" >> "${backup_file}" && \
@@ -88,7 +90,7 @@ for config in "running" "startup" "backup"; do
 done
 backup_file="${timestamp}-${hostname}-mokerlink-${version}-config-backup.tar"
 shafile="${backup_file}.sha1"
-tar -cf - . 2>/dev/null | tee  "${backup_file}" | sha1sum "${backup_file}" > "${shafile}"
+tar -cf - . 2>/dev/null | tee  "${backup_file}" | sha1sum > "${shafile}"
 output_file="${backup_file}"
 
 case "${COMPRESSION:=none}" in

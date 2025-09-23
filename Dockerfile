@@ -18,14 +18,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-ARG HA_BASH_BASE_TAG=1.1.1
+ARG HA_BASH_BASE_TAG=1.0.0
 FROM 1121citrus/ha-bash-base:${HA_BASH_BASE_TAG}
-
-ENV __1121CITRUS_BASE_DIR=/usr/local/1121citrus
-ENV __1121CITRUS_BIN_DIR=${__1121CITRUS_BASE_DIR}/bin
-ENV __1121CITRUS_INCLUDE_BASH_DIR=${__1121CITRUS_BASE_DIR}/include/bash
-ENV BASH=/usr/local/bin/bash
-ENV DEBIAN_FRONTEND=noninteractive
 
 # Download pfmotion_wget.sh and convert it to using environment variables and
 # docker secrets
@@ -46,16 +40,15 @@ RUN set -Eeux; \
         xz>5.8 \
         zip>3.0 \
         && \
-    mkdir -pv -m 700 /root/.{gnupg,ssh} && \
+    mkdir -pv -m 700 /root/.gnupg && \
+    mkdir -pv -m 700 /root/.ssh && \
     touch /root/.gnupg/pubring.kbx && \
     chmod 600 /root/.gnupg/pubring.kbx && \
-    mkdir --parents --verbose --mode 755 ${__1121CITRUS_BIN_DIR} \
-    mkdir --parents --verbose --mode 755 ${__1121CITRUS_INCLUDE_BASH_DIR} \
     true
 
-COPY --chmod=755 ./src/bin/* ${__1121CITRUS_BIN_DIR}
+COPY --chmod=755 ./src/bin/* /usr/local/bin
 
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD /usr/local/bin/healthcheck
 
-CMD [ "/usr/local/1121citrus/bin/startup" ]
+CMD [ "/usr/local/bin/startup" ]
 

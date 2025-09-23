@@ -16,8 +16,15 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# shellcheck disable=SC1090
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1091
+source /usr/local/include/bash/common-functions
+
+# ~/.env is how the startup encodes arguments to be accessed by this command in cron job
 ENV=${ENV:-${HOME:-/root}/.env}
+# shellcheck disable=SC1090
 [[ -r "${ENV}" ]] && source "${ENV}"
 
 set -o errexit -o errtrace -o nounset -o pipefail
@@ -39,7 +46,7 @@ function is_crond_running() {
 }
 
 function is_crontab_configured() {
-    if (crontab -l | grep -q ' /usr/local/bin/backup 2>&1'); then
+    if (crontab -l | grep -q " ${bindir}/backup 2>&1"); then
         true || info crontab is configured
     else
         error crontab is not configured

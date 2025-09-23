@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-command=$(basename "${0}")
-bindir=$(readlink -f $(dirname "${0}"))
-export __HA_BASH_BASE__COMMAND="${command}"
+bindir=$(readlink -f "$(dirname "${0}")")
 
 "${bindir}/get-config" running "${@}"

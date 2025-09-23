@@ -28,7 +28,6 @@ This service will periodically fetch a [Mokerlink managed network switch](https:
 
 You must separately provision and deploy a user on the Mokerlink managed network switch that will be used to copy perform the backups. The user must be granted `Admin` privileges.
 
-
 ## Example: backup periodically as cron job
 
 ```console
@@ -48,45 +47,45 @@ $ docker run -i --rm \
 ### Example Log Output
 
 ```console
-20250922T120714 log [INFO] create env file /root/.env
-20250922T120714 log [INFO] mode of '/root/.env' changed from 0644 (rw-r--r--) to 0600 (rw-------)
-20250922T120714 log [INFO] export AWS_CONFIG_FILE='/run/secrets/aws-config'
-20250922T120714 log [INFO] export AWS_DRYRUN='false'
-20250922T120714 log [INFO] export AWS_S3_BUCKET_NAME='backups-bucket'
-20250922T120714 log [INFO] export COMPRESSION='bzip2'
-20250922T120714 log [INFO] export CRON_EXPRESSION='*/15 * * * *'
-20250922T120714 log [INFO] export DEBUG='Xtrue'
-20250922T120714 log [INFO] export GPG_CIPHER_ALGO='aes256'
-20250922T120714 log [INFO] export GPG_PASSPHRASE='**REDACTED**'
-20250922T120714 log [INFO] export GPG_PASSPHRASE_FILE='/run/secrets/gpg-passphrase'
-20250922T120714 log [INFO] export MOKERLINK_HOST='switch'
-20250922T120714 log [INFO] export MOKERLINK_PASSWORD='**REDACTED**'
-20250922T120714 log [INFO] export MOKERLINK_PASSWORD_FILE='/run/secrets/mokerlink-password'
-20250922T120714 log [INFO] export MOKERLINK_USER='remote-backup'
-20250922T120714 log [INFO] export TAILSCALE_HOST=''
-20250922T120714 log [INFO] export TZ='UTC'
-20250922T160714 log [INFO] installing cron.d entry: /usr/local/1121citrus/bin/backup
-20250922T160714 log [INFO] crontab: */15 * * * * /usr/local/1121citrus/bin/backup 2>&1
-20250922T160714 log [INFO] handing the reins over to cron daemon
+20250922T120714 startup [INFO] create env file /root/.env
+20250922T120714 startup [INFO] mode of '/root/.env' changed from 0644 (rw-r--r--) to 0600 (rw-------)
+20250922T120714 startup [INFO] export AWS_CONFIG_FILE='/run/secrets/aws-config'
+20250922T120714 startup [INFO] export AWS_DRYRUN='false'
+20250922T120714 startup [INFO] export AWS_S3_BUCKET_NAME='backups-bucket'
+20250922T120714 startup [INFO] export COMPRESSION='bzip2'
+20250922T120714 startup [INFO] export CRON_EXPRESSION='*/15 * * * *'
+20250922T120714 startup [INFO] export DEBUG='Xtrue'
+20250922T120714 startup [INFO] export GPG_CIPHER_ALGO='aes256'
+20250922T120714 startup [INFO] export GPG_PASSPHRASE='**REDACTED**'
+20250922T120714 startup [INFO] export GPG_PASSPHRASE_FILE='/run/secrets/gpg-passphrase'
+20250922T120714 startup [INFO] export MOKERLINK_HOST='switch'
+20250922T120714 startup [INFO] export MOKERLINK_PASSWORD='**REDACTED**'
+20250922T120714 startup [INFO] export MOKERLINK_PASSWORD_FILE='/run/secrets/mokerlink-password'
+20250922T120714 startup [INFO] export MOKERLINK_USER='remote-backup'
+20250922T120714 startup [INFO] export TAILSCALE_HOST=''
+20250922T120714 startup [INFO] export TZ='UTC'
+20250922T160714 startup [INFO] installing cron.d entry: /usr/local/1121citrus/bin/backup
+20250922T160714 startup [INFO] crontab: */15 * * * * /usr/local/1121citrus/bin/backup 2>&1
+20250922T160714 startup [INFO] handing the reins over to cron daemon
    .
    .
    .
-20250922T161500 log [INFO] begin backup
-20250922T161500 log [INFO] download 'running' configuration from 'switch'
-20250922T161511 log [INFO] completed download of 'running' configuration from 'switch'
-20250922T161511 log [INFO] download 'startup' configuration from 'switch'
-20250922T161516 log [INFO] completed download of 'startup' configuration from 'switch'
-20250922T161516 log [INFO] download 'backup' configuration from 'switch'
-20250922T161523 log [INFO] completed download of 'backup' configuration from 'switch'
-20250922T161523 log [INFO] compressing backup with bzip2: 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2
-20250922T161523 log [INFO] encrypting backup with 'gpg' (GnuPG)
-20250922T161523 log [INFO] downloaded '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar' to '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg'
-20250922T161523 log [INFO] begin mv '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg' to S3 bucket 'backups-bucket'
-20250922T161523 log [INFO] running aws s3 mv --no-progress '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg' '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1' s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg
-20250922T161524 log [INFO] move: ./20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg to s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg
-20250922T161524 log [INFO] move: ./20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 to s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
-20250922T161524 log [INFO] completed aws s3 mv --no-progress 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
-20250922T161524 log [INFO] finish backup
+20250922T161500 backup [INFO] begin backup
+20250922T161500 backup [INFO] download 'running' configuration from 'switch'
+20250922T161511 backup [INFO] completed download of 'running' configuration from 'switch'
+20250922T161511 backup [INFO] download 'startup' configuration from 'switch'
+20250922T161516 backup [INFO] completed download of 'startup' configuration from 'switch'
+20250922T161516 backup [INFO] download 'backup' configuration from 'switch'
+20250922T161523 backup [INFO] completed download of 'backup' configuration from 'switch'
+20250922T161523 backup [INFO] compressing backup with bzip2: 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2
+20250922T161523 backup [INFO] encrypting backup with 'gpg' (GnuPG)
+20250922T161523 backup [INFO] downloaded '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar' to '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg'
+20250922T161523 backup [INFO] begin mv '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg' to S3 bucket 'backups-bucket'
+20250922T161523 backup [INFO] running aws s3 mv --no-progress '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg' '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1' s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg
+20250922T161524 backup [INFO] move: ./20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg to s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg
+20250922T161524 backup [INFO] move: ./20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 to s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
+20250922T161524 backup [INFO] completed aws s3 mv --no-progress 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
+20250922T161524 backup [INFO] finish backup
 ```
 
 Verify the backup:
@@ -157,7 +156,7 @@ The commands take three arguments:
 1. `hostname`, defaults to the value of the `MOKERLINK_HOST` or `TAILSCALE_HOST` environment variables, if supplied
 1. `username`, defaults to the value of the `MOKERLINK_USER` environment variable or `remote-backup`
 1. `password`, defaults to the value of the `MOKERLINK_PASSWORD` or `MOKERLINK_PASSWORD_FILE` environment variable
- 
+
 ## Example: Docker compose file
 
 ```yml

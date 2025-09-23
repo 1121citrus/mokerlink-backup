@@ -16,6 +16,12 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1091
+source /usr/local/include/bash/common-functions
+
 set -o errexit -o errtrace -o nounset -o pipefail
 if is_true "${DEBUG:-false}"; then set -o xtrace -o verbose; fi
 
@@ -51,7 +57,7 @@ cat "${ENV}" | clean-credentials | info
 source "${ENV}"
 
 # Add our cron entry, and direct stdout & stderr to Docker commands stdout
-COMMAND=${COMMAND:-${__1121CITRUS_BIN_DIR}/backup}
+COMMAND=${COMMAND:-/usr/local/bin/backup}
 info "installing cron.d entry: ${COMMAND}"
 (mkdir -pv /var/spool/cron/crontabs && chmod -c 0755 /var/spool/cron/crontabs) | info
 echo "${CRON_EXPRESSION} ${COMMAND} 2>&1" > /var/spool/cron/crontabs/root && chmod -c 0600 /var/spool/cron/crontabs/root | info

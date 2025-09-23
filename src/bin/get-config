@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1091
+source /usr/local/include/bash/common-functions
+
 function __show_config_raw__() {
     local config="${1:?Need configuration name}"
     local hostname="${2:?Need hostname}"
@@ -28,13 +34,8 @@ expect eof
 __END_OF_SCRIPT__
 }
 
-command=$(basename "${0}")
-bindir=$(readlink -f $(dirname "${0}"))
-export __HA_BASH_BASE__COMMAND="${command}"
-
-
 config="${1:-running}"
-config=$(echo "${config}" | tr [A-Z] [a-z])
+config=$(echo "${config}" | tr '[:upper:]' '[:lower:]')
 [[ "${config}" =~ ^(running|startup|backup)$ ]] || \
     error "unknown configuration: '${config}' -- expecting one of  'running', 'starting' or 'backup'"
 
