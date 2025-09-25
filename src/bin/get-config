@@ -6,12 +6,17 @@ export PATH=${bindir}:${PATH}
 # shellcheck disable=SC1091
 source /usr/local/include/bash/common-functions
 
+is-true() {
+    echo "${1}" | grep -E -i -q '^\s*(1|true|t|yes|y)\s*$' >/dev/null 2>&1
+}
+expect_args=$(is-true "${DEBUG:=false}" && echo -n -d)
+
 function __show_config_raw__() {
     local config="${1:?Need configuration name}"
     local hostname="${2:?Need hostname}"
     local username="${3:?Need username}"
     local password="${4:?Need password}"
-    /usr/bin/env expect <<-__END_OF_SCRIPT__
+    /usr/bin/env expect ${expect_args} <<-__END_OF_SCRIPT__
 log_user 0
 set timeout -1
 spawn ssh -F /dev/null -T -o LogLevel=quiet -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa -l ${username} ${hostname}
