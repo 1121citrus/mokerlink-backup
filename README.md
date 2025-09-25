@@ -28,6 +28,8 @@ This service will periodically fetch a [Mokerlink managed network switch](https:
 
 You must separately provision and deploy a user on the Mokerlink managed network switch that will be used to copy perform the backups. The user must be granted `Admin` privileges.
 
+Ensure that firewall rules allow the container to reach the switch's SSH port (22/tcp).
+
 ## Example: backup periodically as cron job
 
 ```console
