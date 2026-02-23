@@ -1,0 +1,86 @@
+---
+name: Build and Push (staging)
+
+"on":
+  push:
+    branches:
+      - staging
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    env:
+      BASE_IMAGE: python:3.13-alpine
+      IMAGE_NAME: >-
+        ${{ secrets.DOCKERHUB_USERNAME }}/canonicalize-json
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute base image digest
+        id: base-digest
+        run: |
+          digest=$(docker buildx imagetools inspect "${BASE_IMAGE}" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')
+          echo "current=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached base image digest
+        id: cache-base-digest
+        uses: actions/cache@v4
+        with:
+          path: .cache/base-image-digest
+          key: base-image-digest-${{ steps.base-digest.outputs.current }}
+          restore-keys: |
+            base-image-digest-
+
+      - name: Check if base image changed
+        id: check-base
+        run: |
+          mkdir -p .cache/base-image-digest
+          prev=""
+          if [[ -f .cache/base-image-digest/last ]]; then
+            prev=$(cat .cache/base-image-digest/last)
+          fi
+          echo "previous=${prev}" >> "$GITHUB_OUTPUT"
+          if [[ "${prev}" == \
+            "${{ steps.base-digest.outputs.current }}" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          current="${{ steps.base-digest.outputs.current }}"
+          echo "${current}" > .cache/base-image-digest/last
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        if: ${{ steps.check-base.outputs.changed == 'true' }}
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Generate Datetime Tag
+        id: generate_tag
+        run: >-
+          echo "version=staging-$(date -u +'%Y.%m.%d.%H%M%S')" >>
+          "$GITHUB_ENV"
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        if: ${{ steps.check-base.outputs.changed == 'true' }}
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          sbom: true
+          provenance: mode=max
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ env.version }}
+            ${{ env.IMAGE_NAME }}:staging

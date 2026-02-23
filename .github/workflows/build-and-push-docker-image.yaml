@@ -1,0 +1,160 @@
+---
+name: Semantic Versioning, Docker Build, Push, and Scan
+
+"on":
+  push:
+    branches:
+      - main
+
+jobs:
+  semver:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      new_version: ${{ steps.bump-semver.outputs.new_version }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Latest Tag
+        id: get-latest-tag
+        run: |
+          tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine Version Bump Type
+        id: determine-bump-type
+        run: |
+          echo "level=patch" >> "$GITHUB_ENV"
+          if git log -1 --pretty=%B | grep -q 'bump: major'; then
+            echo "level=major" >> "$GITHUB_ENV"
+          elif git log -1 --pretty=%B | grep -q 'bump: minor'; then
+            echo "level=minor" >> "$GITHUB_ENV"
+          fi
+
+      - name: Bump SemVer
+        id: bump-semver
+        run: |
+          current="${{ steps.get-latest-tag.outputs.tag }}"
+          version="${current#v}"
+          IFS='.' read -r major minor patch <<< "${version}"
+          case "${{ env.level }}" in
+            major) major=$((major+1)); minor=0; patch=0 ;;
+            minor) minor=$((minor+1)); patch=0 ;;
+            *)     patch=$((patch+1)) ;;
+          esac
+          new_version="${major}.${minor}.${patch}"
+          echo "new_version=${new_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Push New Tag
+        run: |
+          new_version="${{ steps.bump-semver.outputs.new_version }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
+          git tag -a "${new_version}" -m "${new_version}: PR #${{ github.event.pull_request.number }} ${{ github.event.pull_request.title }}"
+          git push origin "${new_version}"
+
+  docker:
+    needs: semver
+    runs-on: ubuntu-latest
+    outputs:
+      base_changed: ${{ steps.check-base.outputs.changed }}
+    env:
+      BASE_IMAGE: python:3.13-alpine
+      IMAGE_NAME: >-
+        ${{ secrets.DOCKERHUB_USERNAME }}/canonicalize-json
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute base image digest
+        id: base-digest
+        run: |
+          digest=$(docker buildx imagetools inspect "${BASE_IMAGE}" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')
+          echo "current=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached base image digest
+        id: cache-base-digest
+        uses: actions/cache@v4
+        with:
+          path: .cache/base-image-digest
+          key: base-image-digest-${{ steps.base-digest.outputs.current }}
+          restore-keys: |
+            base-image-digest-
+
+      - name: Check if base image changed
+        id: check-base
+        run: |
+          mkdir -p .cache/base-image-digest
+          prev=""
+          if [[ -f .cache/base-image-digest/last ]]; then
+            prev=$(cat .cache/base-image-digest/last)
+          fi
+          echo "previous=${prev}" >> "$GITHUB_OUTPUT"
+          if [[ "${prev}" == \
+            "${{ steps.base-digest.outputs.current }}" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          current="${{ steps.base-digest.outputs.current }}"
+          echo "${current}" > .cache/base-image-digest/last
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        if: ${{ steps.check-base.outputs.changed == 'true' }}
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        if: ${{ steps.check-base.outputs.changed == 'true' }}
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          sbom: true
+          provenance: mode=max
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.semver.outputs.new_version }}
+            ${{ env.IMAGE_NAME }}:latest
+
+  scan:
+    needs:
+      - semver
+      - docker
+    runs-on: ubuntu-latest
+    if: ${{ needs.docker.outputs.base_changed == 'true' }}
+    env:
+      IMAGE_NAME: >-
+        ${{ secrets.DOCKERHUB_USERNAME }}/canonicalize-json
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy Vulnerability Scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'image'
+          image-ref: >-
+            ${{ env.IMAGE_NAME }}:${{ needs.semver.outputs.new_version }}
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
