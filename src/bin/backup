@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# An application specific service to create pfSense backups and copy them off site.
+# An application specific service to create Mokerlink switch backups and copy them off site.
 #
 # Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
 #
@@ -30,6 +30,7 @@ ENV=${ENV:-${HOME:-/root}/.env}
 
 set -o errexit -o errtrace -o nounset -o pipefail
 is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+# future: we may perform additional startup checks here
 
 timestamp=$(date +%Y%m%dT%H%M%S)
 
@@ -59,12 +60,12 @@ fi
 [[ -n "${password}" ]] || error 'need MOKERLINK_PASSWORD or MOKERLINK_PASSWORD_FILE (default: /run/secrets/mokerlink-password)'
 
 gpg_encrypt=false
-gpg_args="--symmetric --cipher-algo ${GPG_CIPHER_ALGO:=aes256} --batch"
+gpg_args=(--symmetric --cipher-algo "${GPG_CIPHER_ALGO:=aes256}" --batch)
 if [[ -n "${GPG_PASSPHRASE:=}" ]]; then
-    gpg_args="${gpg_args} --passphrase ${GPG_PASSPHRASE}"
+    gpg_args+=(--passphrase "${GPG_PASSPHRASE}")
     gpg_encrypt=true
 elif [[ -r "${GPG_PASSPHRASE_FILE:=/run/secrets/gpg-passphrase}" ]]; then
-    gpg_args="${gpg_args} --passphrase-file ${GPG_PASSPHRASE_FILE}"
+    gpg_args+=(--passphrase-file "${GPG_PASSPHRASE_FILE}")
     gpg_encrypt=true
 fi
 
@@ -84,13 +85,14 @@ for config in "running" "startup" "backup"; do
     is_true "${DEBUG}" && debug "backup_file='$backup_file'"
     # Add header to pulled XML file
     (echo 'SYSTEM CONFIG FILE ::= BEGIN' && \
-     echo "! Backup: ${backup_file}" >> "${backup_file}" && \
+     echo "! Backup: ${backup_file}" && \
      tail -n +2 "${config_tmp}") > "${backup_file}"
     info "completed download of '${config}' configuration from '${host}'"
 done
 backup_file="${timestamp}-${hostname}-mokerlink-${version}-config-backup.tar"
 shafile="${backup_file}.sha1"
-tar -cf - . 2>/dev/null | tee  "${backup_file}" | sha1sum > "${shafile}"
+tar -cf "${backup_file}" -- *.xml
+sha1sum "${backup_file}" > "${shafile}"
 output_file="${backup_file}"
 
 case "${COMPRESSION:=none}" in
@@ -142,38 +144,35 @@ case "${COMPRESSION:=none}" in
 
     zip)
         info "compressing backup with zip -q -9: ${output_file}.zip"
-        zip -q -9 <"${output_file}" >"${output_file}.zip"
+        zip -q -9 "${output_file}.zip" "${output_file}"
         output_file="${output_file}.zip"
         ;;
 
     *)
-        error "unknown compression algrorithm: '${COMPRESSION}'"
+        error "unknown compression algorithm: '${COMPRESSION}'"
         ;;
 esac
 
 if "${gpg_encrypt}"; then
     info "encrypting backup with 'gpg' (GnuPG)"
-    # shellcheck disable=SC2086
-    gpg ${gpg_args} --output "${output_file}.gpg" "${output_file}"
+    gpg "${gpg_args[@]}" --output "${output_file}.gpg" "${output_file}"
     output_file="${output_file}.gpg"
 fi
 
 info "downloaded '${backup_file}' to '${output_file}'"
 
-awsargs=--no-progress
-is_true "${dryrun}" && awsargs="${awsargs} --dryrun"
+awsargs=(--no-progress)
+is_true "${dryrun}" && awsargs+=(--dryrun)
 
 info "begin mv '${output_file}' to S3 bucket '${bucket}'"
 uri="s3://${bucket}/${output_file}"
 shauri="s3://${bucket}/${shafile}"
-info "running aws s3 mv ${awsargs} '${output_file}' '${shafile}' ${uri}"
-# shellcheck disable=SC2086
-(aws s3 mv ${awsargs} "${output_file}" "${uri}" || \
+info "running aws s3 mv ${awsargs[*]} '${output_file}' '${shafile}' ${uri}"
+(aws s3 mv "${awsargs[@]}" "${output_file}" "${uri}" || \
     (error "aws s3 mv '${output_file}' exited with status ${?}" || true)) 2>&1 | info
-# shellcheck disable=SC2086
-(aws s3 mv ${awsargs} "${shafile}" "${shauri}" || \
-    (error "aws s3 mv '${output_file}' exited with status ${?}" || true)) 2>&1 | info
-info "completed aws s3 mv ${awsargs} ${output_file} ${shafile} ${shauri}"
+(aws s3 mv "${awsargs[@]}" "${shafile}" "${shauri}" || \
+    (error "aws s3 mv '${shafile}' exited with status ${?}" || true)) 2>&1 | info
+info "completed aws s3 mv ${awsargs[*]} ${output_file} ${shafile} ${shauri}"
 info "finish ${command}"
 exit 0
 

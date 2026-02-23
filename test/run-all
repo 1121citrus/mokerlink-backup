@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+# mokerlink-backup: run the full test suite.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+set -euo pipefail
+
+whereami=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+
+status=0
+"${whereami}/backup-required-vars"  || status=1
+"${whereami}/backup-success"        || status=1
+"${whereami}/backup-encryption"     || status=1
+"${whereami}/healthcheck"           || status=1
+exit $status

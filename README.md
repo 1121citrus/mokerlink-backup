@@ -49,51 +49,50 @@ $ docker run -i --rm \
 ### Example Log Output
 
 ```console
-20250922T120714 startup [INFO] create env file /root/.env
-20250922T120714 startup [INFO] mode of '/root/.env' changed from 0644 (rw-r--r--) to 0600 (rw-------)
-20250922T120714 startup [INFO] export AWS_CONFIG_FILE='/run/secrets/aws-config'
-20250922T120714 startup [INFO] export AWS_DRYRUN='false'
-20250922T120714 startup [INFO] export AWS_S3_BUCKET_NAME='backups-bucket'
-20250922T120714 startup [INFO] export COMPRESSION='bzip2'
-20250922T120714 startup [INFO] export CRON_EXPRESSION='*/15 * * * *'
-20250922T120714 startup [INFO] export DEBUG='Xtrue'
-20250922T120714 startup [INFO] export GPG_CIPHER_ALGO='aes256'
-20250922T120714 startup [INFO] export GPG_PASSPHRASE='**REDACTED**'
-20250922T120714 startup [INFO] export GPG_PASSPHRASE_FILE='/run/secrets/gpg-passphrase'
-20250922T120714 startup [INFO] export MOKERLINK_HOST='switch'
-20250922T120714 startup [INFO] export MOKERLINK_PASSWORD='**REDACTED**'
-20250922T120714 startup [INFO] export MOKERLINK_PASSWORD_FILE='/run/secrets/mokerlink-password'
-20250922T120714 startup [INFO] export MOKERLINK_USER='remote-backup'
-20250922T120714 startup [INFO] export TAILSCALE_HOST=''
-20250922T120714 startup [INFO] export TZ='UTC'
-20250922T160714 startup [INFO] installing cron.d entry: /usr/local/1121citrus/bin/backup
-20250922T160714 startup [INFO] crontab: */15 * * * * /usr/local/1121citrus/bin/backup 2>&1
-20250922T160714 startup [INFO] handing the reins over to cron daemon
+[INFO] 20250922T120714 startup create env file /root/.env
+[INFO] 20250922T120714 startup export AWS_CONFIG_FILE='/run/secrets/aws-config'
+[INFO] 20250922T120714 startup export AWS_DRYRUN='false'
+[INFO] 20250922T120714 startup export AWS_S3_BUCKET_NAME='backups-bucket'
+[INFO] 20250922T120714 startup export COMPRESSION='bzip2'
+[INFO] 20250922T120714 startup export CRON_EXPRESSION='*/15 * * * *'
+[INFO] 20250922T120714 startup export DEBUG='true'
+[INFO] 20250922T120714 startup export GPG_CIPHER_ALGO='aes256'
+[INFO] 20250922T120714 startup export GPG_PASSPHRASE='**REDACTED**'
+[INFO] 20250922T120714 startup export GPG_PASSPHRASE_FILE='/run/secrets/gpg-passphrase'
+[INFO] 20250922T120714 startup export MOKERLINK_HOST='switch'
+[INFO] 20250922T120714 startup export MOKERLINK_PASSWORD='**REDACTED**'
+[INFO] 20250922T120714 startup export MOKERLINK_PASSWORD_FILE='/run/secrets/mokerlink-password'
+[INFO] 20250922T120714 startup export MOKERLINK_USER='remote-backup'
+[INFO] 20250922T120714 startup export TAILSCALE_HOST=''
+[INFO] 20250922T120714 startup export TZ='UTC'
+[INFO] 20250922T160714 startup installing cron.d entry: /usr/local/bin/backup
+[INFO] 20250922T160714 startup crontab: */15 * * * * /usr/local/bin/backup 2>&1
+[INFO] 20250922T160714 startup handing the reins over to cron daemon
    .
    .
    .
-20250922T161500 backup [INFO] begin backup
-20250922T161500 backup [INFO] download 'running' configuration from 'switch'
-20250922T161511 backup [INFO] completed download of 'running' configuration from 'switch'
-20250922T161511 backup [INFO] download 'startup' configuration from 'switch'
-20250922T161516 backup [INFO] completed download of 'startup' configuration from 'switch'
-20250922T161516 backup [INFO] download 'backup' configuration from 'switch'
-20250922T161523 backup [INFO] completed download of 'backup' configuration from 'switch'
-20250922T161523 backup [INFO] compressing backup with bzip2: 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2
-20250922T161523 backup [INFO] encrypting backup with 'gpg' (GnuPG)
-20250922T161523 backup [INFO] downloaded '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar' to '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg'
-20250922T161523 backup [INFO] begin mv '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg' to S3 bucket 'backups-bucket'
-20250922T161523 backup [INFO] running aws s3 mv --no-progress '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg' '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1' s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg
-20250922T161524 backup [INFO] move: ./20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg to s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg
-20250922T161524 backup [INFO] move: ./20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 to s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
-20250922T161524 backup [INFO] completed aws s3 mv --no-progress 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
-20250922T161524 backup [INFO] finish backup
+[INFO] 20250922T161500 backup begin backup
+[INFO] 20250922T161500 backup download 'running' configuration from 'switch'
+[INFO] 20250922T161511 backup completed download of 'running' configuration from 'switch'
+[INFO] 20250922T161511 backup download 'startup' configuration from 'switch'
+[INFO] 20250922T161516 backup completed download of 'startup' configuration from 'switch'
+[INFO] 20250922T161516 backup download 'backup' configuration from 'switch'
+[INFO] 20250922T161523 backup completed download of 'backup' configuration from 'switch'
+[INFO] 20250922T161523 backup compressing backup with bzip2: 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2
+[INFO] 20250922T161523 backup encrypting backup with 'gpg' (GnuPG)
+[INFO] 20250922T161523 backup downloaded '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar' to '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg'
+[INFO] 20250922T161523 backup begin mv '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg' to S3 bucket 'backups-bucket'
+[INFO] 20250922T161523 backup running aws s3 mv --no-progress '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg' '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1' s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg
+[INFO] 20250922T161524 backup move: ./20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg to s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg
+[INFO] 20250922T161524 backup move: ./20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 to s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
+[INFO] 20250922T161524 backup completed aws s3 mv --no-progress 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
+[INFO] 20250922T161524 backup finish backup
 ```
 
 Verify the backup:
 
 ```console
-$ aws s3 cp s3://backups-bucket/20250922T161500-switch--mokerlink-1.0.0.27-config-backup.tar.sha1 -
+$ aws s3 cp s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 -
 abcb223c64e4b2206a34db069c6bb5ac7949d719  20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar
 $ aws s3 cp --quiet s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - |  gpg --passphrase-file ../1121-citrus/home-assistant/secrets/gpg-passphrase --decrypt --batch --quiet| bunzip2 | sha1sum
 abcb223c64e4b2206a34db069c6bb5ac7949d719  -
@@ -119,13 +118,21 @@ $ docker run -i --rm \
       -v ./secrets/gpg-passphrase:/run/secrets/gpg-passphrase:ro \
       -v /etc/localtime:/etc/localtime:ro \
       1121citrus/mokerlink-backup backup
-20250915T013601 backup [INFO] begin backup
-20250915T013604 backup [INFO] downloaded '20250915T013604-switch-mokerlink-v24.0-config-backup.xml'
-20250915T013604 backup [INFO] begin mv '20250915T013604-switch-mokerlink-v24.0-config-backup.xml' to S3 bucket 'backups-bucket'
-20250915T013604 backup [INFO] running aws s3 mv --no-progress 20250915T013604-switch-mokerlink-v24.0-config-backup.xml s3://backups-bucket/20250915T013604-switch-mokerlink-v24.0-config-backup.xml
-20250915T013606 backup [INFO] move: ./20250915T013604-switch-mokerlink-v24.0-config-backup.xml to s3://backups-bucket/20250915T013604-switch-mokerlink-v24.0-config-backup.xml
-20250915T013606 backup [INFO] completed aws s3 mv --no-progress 20250915T013604-switch-mokerlink-v24.0-config-backup.xml s3://backups-bucket/20250915T013604-switch-mokerlink-v24.0-config-backup.xml
-20250915T013606 backup [INFO] finish backup
+[INFO] 20250915T013601 backup begin backup
+[INFO] 20250915T013601 backup download 'running' configuration from 'switch'
+[INFO] 20250915T013604 backup completed download of 'running' configuration from 'switch'
+[INFO] 20250915T013604 backup download 'startup' configuration from 'switch'
+[INFO] 20250915T013607 backup completed download of 'startup' configuration from 'switch'
+[INFO] 20250915T013607 backup download 'backup' configuration from 'switch'
+[INFO] 20250915T013610 backup completed download of 'backup' configuration from 'switch'
+[INFO] 20250915T013610 backup compressing backup with gzip --best --no-name --quiet --synchronous: 20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz
+[INFO] 20250915T013610 backup downloaded '20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar' to '20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz'
+[INFO] 20250915T013610 backup begin mv '20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz' to S3 bucket 'backups-bucket'
+[INFO] 20250915T013610 backup running aws s3 mv --no-progress '20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz' '20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.sha1' s3://backups-bucket/20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz
+[INFO] 20250915T013611 backup move: ./20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz to s3://backups-bucket/20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz
+[INFO] 20250915T013611 backup move: ./20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 to s3://backups-bucket/20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
+[INFO] 20250915T013611 backup completed aws s3 mv --no-progress 20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz 20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 s3://backups-bucket/20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
+[INFO] 20250915T013611 backup finish backup
 ```
 
 ## Example: Fetch running, startup or backup configurations
@@ -185,9 +192,9 @@ secrets:
   aws-config:
     file: ./secrets/aws-config
   gpg-passphrase:
-    file ./secrets/gpg-passphrase
+    file: ./secrets/gpg-passphrase
   mokerlink-password:
-    file ./secrets/mokerlink-password
+    file: ./secrets/mokerlink-password
 ```
 
 ## Configuration
@@ -207,7 +214,7 @@ Variable | Default | Notes
 `MOKERLINK_PASSWORD` | _none_ | The password to unlock the identity file. WARNING: consider using the more secure `MOKERLINK_PASSWORD_FILE`, which might be a bind mount or a compose secret. Note that the definition of `MOKERLINK_PASSWORD` overrides any `MOKERLINK_PASSWORD_FILE` definition.
 `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` | A file containing the password to unlock the identity file. This is intended to be a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/) but could also be a bind mount.
 `MOKERLINK_USER` | `remote-backup` | The username to use to access the Mokerlink managed network switch.
-`TAILSCALE_HOST` | _see notes_ | Specify the hostname or IP address of the Mokerlink managed network switch on the Tailscale mesh. Do not include the final `/`, otherwise backup will fail. Defaults to the gateway IP address if it's a private address.
+`TAILSCALE_HOST` | _see notes_ | Specify the hostname or IP address of the Mokerlink managed network switch on the Tailscale mesh. Do not include the final `/`, otherwise backup will fail. Used only when `MOKERLINK_HOST` is unset.
 `TZ` | `UTC` | Which timezone should `cron` use, e.g. `America/New_York` or `Europe/Warsaw`. See [full list of available time zones](http://manpages.ubuntu.com/manpages/bionic/man3/DateTime::TimeZone::Catalog.3pm.html).
 
 ## Building

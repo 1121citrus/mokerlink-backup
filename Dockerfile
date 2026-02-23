@@ -18,35 +18,38 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-ARG HA_BASH_BASE_TAG=1.0.0
-FROM 1121citrus/ha-bash-base:${HA_BASH_BASE_TAG}
+ARG ALPINE_TAG=3.21
+FROM alpine:${ALPINE_TAG}
 
-# Download pfmotion_wget.sh and convert it to using environment variables and
-# docker secrets
+# install required utilities and configure environment
 RUN set -Eeux; \
     apk update && \
+    apk upgrade --no-cache --no-interactive && \
     apk add --no-cache --no-interactive --upgrade \
         aws-cli>2.27 \
+        bash>5.2 \
         bzip2>1.0 \
         bzip3>1.5 \
         expect>5.45 \
         gnupg>2.4 \
         gzip>1.14 \
+        lzop>1.04 \
         openssh>10.0 \
-        openssl>3.5 \
+        openssl>3.3 \
         pigz>2.8 \
         pixz>1.0 \
-        sshpass>1.10 \
-        xz>5.8 \
+        xz>5.6 \
         zip>3.0 \
         && \
-    mkdir -pv -m 700 /root/.gnupg && \
-    mkdir -pv -m 700 /root/.ssh && \
+    mkdir -pv -m 700 /root/.gnupg /root/.ssh && \
     touch /root/.gnupg/pubring.kbx && \
     chmod 600 /root/.gnupg/pubring.kbx && \
+    mkdir -pv /usr/local/include/bash && \
+    ln -sf /usr/local/bin/common-functions /usr/local/include/bash/common-functions && \
     true
 
 COPY --chmod=755 ./src/bin/* /usr/local/bin
+COPY --chmod=755 ./src/common-functions /usr/local/bin/
 
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD /usr/local/bin/healthcheck
 

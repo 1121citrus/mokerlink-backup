@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+# Stub get-config for tests.
+config=$1
+shift
+cat <<'EOF'
+! System Version: v1.2.3
+! System Name: test-switch
+EOF

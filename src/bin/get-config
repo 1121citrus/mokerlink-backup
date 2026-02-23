@@ -6,29 +6,36 @@ export PATH=${bindir}:${PATH}
 # shellcheck disable=SC1091
 source /usr/local/include/bash/common-functions
 
-is-true() {
-    echo "${1}" | grep -E -i -q '^\s*(1|true|t|yes|y)\s*$' >/dev/null 2>&1
-}
-expect_args=$(is-true "${DEBUG:=false}" && echo -n -d)
+expect_args=$(is_true "${DEBUG:=false}" && echo -n -d)
 
 function __show_config_raw__() {
     local config="${1:?Need configuration name}"
     local hostname="${2:?Need hostname}"
     local username="${3:?Need username}"
     local password="${4:?Need password}"
-    /usr/bin/env expect ${expect_args} <<-__END_OF_SCRIPT__
+    EXPECT_CONFIG="${config}" \
+    EXPECT_HOSTNAME="${hostname}" \
+    EXPECT_USERNAME="${username}" \
+    EXPECT_PASSWORD="${password}" \
+    /usr/bin/env expect ${expect_args} <<-'__END_OF_SCRIPT__'
 log_user 0
 set timeout -1
-spawn ssh -F /dev/null -T -o LogLevel=quiet -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa -l ${username} ${hostname}
+set config $env(EXPECT_CONFIG)
+set hostname $env(EXPECT_HOSTNAME)
+set username $env(EXPECT_USERNAME)
+set password $env(EXPECT_PASSWORD)
+spawn ssh -F /dev/null -T -o LogLevel=quiet -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null -o HostKeyAlgorithms=+ssh-rsa \
+      -o PubkeyAcceptedAlgorithms=+ssh-rsa -l $username $hostname
 match_max 100000
 expect "Username: "
-send -- "${username}\r"
+send -- "$username\r"
 expect "Password: "
-send -- "${password}\r"
+send -- "$password\r"
 expect "# "
 send -- "terminal length 0\r"
 expect "# "
-send -- "show ${config}-config\r"
+send -- "show $config-config\r"
 log_user 1
 expect "# "
 log_user 0
@@ -42,7 +49,7 @@ __END_OF_SCRIPT__
 config="${1:-running}"
 config=$(echo "${config}" | tr '[:upper:]' '[:lower:]')
 [[ "${config}" =~ ^(running|startup|backup)$ ]] || \
-    error "unknown configuration: '${config}' -- expecting one of  'running', 'starting' or 'backup'"
+    error "unknown configuration: '${config}' -- expecting one of 'running', 'startup' or 'backup'"
 
 host="${2:-${MOKERLINK_HOST:=${TAILSCALE_HOST:=}}}"
 [[ -n "${host}" ]] || error 'need hostname, or set MOKERLINK_HOST or TAILSCALE_HOST environment variable'

@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+# Common bash functions.
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+function __log() {
+    local severity=${1:?Need severity}
+    shift
+    echo "[${severity}]" "$(date '+%Y%m%dT%H%M%S')" "$(basename "${0}")" "${@:-}" >/dev/stderr
+}
+
+function log() {
+    local severity=${1:?Need severity}
+    shift
+    if [[ -n "${@:-}" ]]; then
+        __log "${severity}" "${@}"
+    else
+        while read -r line; do
+            __log "${severity}" "${line}"
+        done
+    fi
+}
+
+function debug() {
+    log DEBUG "${@:-}"
+}
+
+function error() {
+    log ERROR "${@:-}"
+    exit "${EXIT_CODE:-1}"
+}
+
+function ignore() {
+    log IGNORE "${@:-}"
+}
+
+function info() {
+    log INFO "${@:-}"
+}
+
+function is_true() {
+    echo "${1:?Need argument}" | grep -Eiq '^\s*(1|true|t|yes|y)\s*$'
+}

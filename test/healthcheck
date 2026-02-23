@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+# mokerlink-backup: test all healthcheck scenarios.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+set -euo pipefail
+
+setup() {
+    whereami=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+    IMAGE=${IMAGE:-1121citrus/mokerlink-backup:latest}
+
+    run_healthcheck() {
+        local script=$1; shift
+        docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+            --entrypoint /bin/bash \
+            -v "${whereami}/bin/get-config:/usr/local/bin/get-config:ro" \
+            "$@" \
+            "${IMAGE}" \
+            -c "${script}" >/dev/null 2>&1
+    }
+    export -f run_healthcheck
+}
+
+test_healthcheck_unhealthy_no_crond() {
+    # crond is not running inside a plain docker run; healthcheck should return non-zero
+    run_healthcheck \
+        "/usr/local/bin/healthcheck" \
+        && result=0 || result=$?
+    if [[ ${result} -ne 0 ]]; then
+        echo "PASS '${FUNCNAME[0]}': healthcheck exits non-zero when crond is absent"
+    else
+        echo "FAIL '${FUNCNAME[0]}': unexpected success when crond absent"
+        return 1
+    fi
+}
+
+test_healthcheck_healthy_with_crond() {
+    # Start crond + install crontab, then run healthcheck
+    local script
+    script='mkdir -p /var/spool/cron/crontabs'
+    script+=' && printf "%s\n" "* * * * * /usr/local/bin/backup 2>&1" > /var/spool/cron/crontabs/root'
+    script+=' && crond -l 2 && sleep 0.5'
+    script+=' && /usr/local/bin/healthcheck'
+    run_healthcheck "${script}" && result=0 || result=$?
+    if [[ ${result} -eq 0 ]]; then
+        echo "PASS '${FUNCNAME[0]}': healthcheck succeeds with crond running and crontab configured"
+    else
+        echo "FAIL '${FUNCNAME[0]}': healthcheck should have succeeded (exit ${result})"
+        return 1
+    fi
+}
+
+test_healthcheck_unhealthy_no_crontab() {
+    # Start crond but do NOT install a crontab
+    local script='crond -l 2 && sleep 0.5 && /usr/local/bin/healthcheck'
+    run_healthcheck "${script}" && result=0 || result=$?
+    if [[ ${result} -ne 0 ]]; then
+        echo "PASS '${FUNCNAME[0]}': healthcheck exits non-zero when crontab is missing"
+    else
+        echo "FAIL '${FUNCNAME[0]}': should have failed without crontab"
+        return 1
+    fi
+}
+
+run_tests() {
+    local passed=0
+    local tests=(
+        test_healthcheck_unhealthy_no_crond
+        test_healthcheck_healthy_with_crond
+        test_healthcheck_unhealthy_no_crontab
+    )
+
+    setup || { echo "ERROR: Setup failed"; return 1; }
+
+    echo "Running tests for healthcheck..."
+    echo "================================="
+
+    for test in "${tests[@]}"; do
+        "${test}" && ((passed++)) || :
+    done
+
+    local failed=$(( ${#tests[@]} - passed ))
+    echo "================================="
+    echo "Results: ${passed} passed, ${failed} failed"
+    return "${failed}"
+}
+
+[[ "${BASH_SOURCE[0]}" == "$0" ]] && run_tests

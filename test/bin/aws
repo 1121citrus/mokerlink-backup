@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+# aws stub: simulate successful S3 move operations for tests.
+if [[ "${1:-}" == "s3" && "${2:-}" == "mv" ]]; then
+    args=()
+    for arg in "$@"; do
+        [[ "${arg}" =~ ^- ]] || args+=("${arg}")
+    done
+    local_file="${args[-2]}"
+    echo "move: ${local_file} to ${args[-1]}"
+    # When /output is mounted, copy the source file there for test inspection
+    if [[ -d /output ]]; then
+        cp "${local_file}" /output/ 2>/dev/null || true
+    fi
+fi
+exit 0
