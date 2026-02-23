@@ -12,7 +12,7 @@ jobs:
     env:
       BASE_IMAGE: python:3.13-alpine
       IMAGE_NAME: >-
-        ${{ secrets.DOCKERHUB_USERNAME }}/canonicalize-json
+        ${{ secrets.DOCKERHUB_USERNAME }}/mokerlink-backup
 
     steps:
       - name: Checkout Code
