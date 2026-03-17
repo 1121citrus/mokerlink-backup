@@ -62,7 +62,8 @@ source "${ENV}"
 COMMAND=${COMMAND:-/usr/local/bin/backup}
 info "installing cron.d entry: ${COMMAND}"
 (mkdir -pv /var/spool/cron/crontabs && chmod -c 0755 /var/spool/cron/crontabs) | info
-echo "${CRON_EXPRESSION} ${COMMAND} 2>&1" > /var/spool/cron/crontabs/root && chmod -c 0600 /var/spool/cron/crontabs/root | info
+echo "${CRON_EXPRESSION} ${COMMAND} 2>&1" > /var/spool/cron/crontabs/root
+chmod -c 0600 /var/spool/cron/crontabs/root | info
 info "crontab: $(cat /var/spool/cron/crontabs/root)"
 
 info "handing the reins over to cron daemon"

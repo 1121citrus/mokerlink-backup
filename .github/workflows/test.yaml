@@ -1,0 +1,52 @@
+---
+# Run the full test suite on every PR and every branch push.
+# This workflow is a required status check that must pass before merging.
+name: Test
+
+"on":
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - main
+      - staging
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build the image locally (no push) for the host platform only.
+      # The local image is tagged with the git SHA so parallel runs cannot
+      # collide on the "latest" tag.
+      - name: Build image (local, host platform)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          platforms: linux/amd64
+          tags: |
+            1121citrus/mokerlink-backup:ci-${{ github.sha }}
+
+      # Run the full test suite against the freshly built image.
+      # test/run-all executes: backup-required-vars, backup-success,
+      # backup-encryption, and healthcheck.
+      - name: Run test suite
+        env:
+          IMAGE: 1121citrus/mokerlink-backup:ci-${{ github.sha }}
+        run: |
+          chmod +x test/run-all test/backup-* test/healthcheck test/bin/*
+          IMAGE="${IMAGE}" ./test/run-all

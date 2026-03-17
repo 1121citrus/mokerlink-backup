@@ -1,25 +1,51 @@
 #!/usr/bin/env bash
 
+# An application specific service to fetch Mokerlink switch configurations.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 bindir=$(readlink -f "$(dirname "${0}")")
 export PATH=${bindir}:${PATH}
 
 # shellcheck disable=SC1091
 source /usr/local/include/bash/common-functions
 
-expect_args=$(is_true "${DEBUG:=false}" && echo -n -d)
+set -o errexit -o errtrace -o nounset -o pipefail
+
+expect_args=()
+is_true "${DEBUG:=false}" && expect_args+=(-d) || true
 
 function __show_config_raw__() {
     local config="${1:?Need configuration name}"
     local hostname="${2:?Need hostname}"
     local username="${3:?Need username}"
     local password="${4:?Need password}"
+    # SSH_CONNECT_TIMEOUT: seconds to wait for the switch to respond.
+    # Default 30s.  Set to 0 to disable (not recommended — the process will
+    # hang indefinitely if the switch is unreachable).
+    local timeout="${SSH_CONNECT_TIMEOUT:-30}"
     EXPECT_CONFIG="${config}" \
     EXPECT_HOSTNAME="${hostname}" \
     EXPECT_USERNAME="${username}" \
     EXPECT_PASSWORD="${password}" \
-    /usr/bin/env expect ${expect_args} <<-'__END_OF_SCRIPT__'
+    EXPECT_TIMEOUT="${timeout}" \
+    /usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
 log_user 0
-set timeout -1
+# Use the caller-supplied timeout; 0 means no timeout (not recommended).
+set timeout $env(EXPECT_TIMEOUT)
 set config $env(EXPECT_CONFIG)
 set hostname $env(EXPECT_HOSTNAME)
 set username $env(EXPECT_USERNAME)
@@ -56,13 +82,14 @@ host="${2:-${MOKERLINK_HOST:=${TAILSCALE_HOST:=}}}"
 
 user="${3:-${MOKERLINK_USER:=remote-backup}}"
 
-password="${4:-}"
-if [[ -z "${password}" ]]; then
-    if [[ -n "${MOKERLINK_PASSWORD:=}" ]]; then
-        password="${MOKERLINK_PASSWORD}"
-    elif [[ -r "${MOKERLINK_PASSWORD_FILE:=/run/secrets/mokerlink-password}" ]]; then
-        password=$(cat "${MOKERLINK_PASSWORD_FILE}")
-    fi
+# Password is intentionally NOT accepted as positional arg $4 to avoid
+# exposing it in the process list (ps(1)).  Callers must use the environment
+# variable MOKERLINK_PASSWORD or MOKERLINK_PASSWORD_FILE.
+password=
+if [[ -n "${MOKERLINK_PASSWORD:=}" ]]; then
+    password="${MOKERLINK_PASSWORD}"
+elif [[ -r "${MOKERLINK_PASSWORD_FILE:=/run/secrets/mokerlink-password}" ]]; then
+    password=$(cat "${MOKERLINK_PASSWORD_FILE}")
 fi
 [[ -n "${password}" ]] || error 'need password, or set MOKERLINK_PASSWORD or MOKERLINK_PASSWORD_FILE (default: /run/secrets/mokerlink-password) environment variable'
 
@@ -73,4 +100,3 @@ fi
 # Remove the first two lines
 
 __show_config_raw__ "${config}" "${host}" "${user}" "${password}" | tail -n +3
-

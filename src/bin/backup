@@ -25,10 +25,9 @@ export PATH=${bindir}:${PATH}
 source /usr/local/include/bash/common-functions
 
 ENV=${ENV:-${HOME:-/root}/.env}
+set -o errexit -o errtrace -o nounset -o pipefail
 # shellcheck disable=SC1090
 [[ -r "${ENV}" ]] && source "${ENV}"
-
-set -o errexit -o errtrace -o nounset -o pipefail
 is_true "${DEBUG:=false}" && set -o xtrace -o verbose
 # future: we may perform additional startup checks here
 
@@ -74,7 +73,10 @@ info "begin ${command}"
 for config in "running" "startup" "backup"; do
     info "download '${config}' configuration from '${host}'"
     config_tmp=$(mktemp)
-    bash "${bindir}/get-config" "${config}" "${host}" "${user}" "${password}" >> "${config_tmp}"
+    # Pass password via env var rather than as a positional arg to avoid
+    # exposing it in the process list (visible to ps(1)).
+    MOKERLINK_PASSWORD="${password}" \
+        bash "${bindir}/get-config" "${config}" "${host}" "${user}" >> "${config_tmp}"
     version=$(grep -m1 '^! System Version: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g' | sed 's/^v//g')
     is_true "${DEBUG}" && debug "version='$version'"
     [[ -n "${version}" ]] || error 'invalid Mokerlink configuration file - missing version'
@@ -90,9 +92,9 @@ for config in "running" "startup" "backup"; do
     info "completed download of '${config}' configuration from '${host}'"
 done
 backup_file="${timestamp}-${hostname}-mokerlink-${version}-config-backup.tar"
-shafile="${backup_file}.sha1"
+shafile="${backup_file}.sha256"
 tar -cf "${backup_file}" -- *.xml
-sha1sum "${backup_file}" > "${shafile}"
+sha256sum "${backup_file}" > "${shafile}"
 output_file="${backup_file}"
 
 case "${COMPRESSION:=none}" in
@@ -164,15 +166,15 @@ info "downloaded '${backup_file}' to '${output_file}'"
 awsargs=(--no-progress)
 is_true "${dryrun}" && awsargs+=(--dryrun)
 
-info "begin mv '${output_file}' to S3 bucket '${bucket}'"
 uri="s3://${bucket}/${output_file}"
 shauri="s3://${bucket}/${shafile}"
-info "running aws s3 mv ${awsargs[*]} '${output_file}' '${shafile}' ${uri}"
-(aws s3 mv "${awsargs[@]}" "${output_file}" "${uri}" || \
-    (error "aws s3 mv '${output_file}' exited with status ${?}" || true)) 2>&1 | info
-(aws s3 mv "${awsargs[@]}" "${shafile}" "${shauri}" || \
-    (error "aws s3 mv '${shafile}' exited with status ${?}" || true)) 2>&1 | info
-info "completed aws s3 mv ${awsargs[*]} ${output_file} ${shafile} ${shauri}"
+info "upload backup: '${output_file}' → '${uri}'"
+aws s3 mv "${awsargs[@]}" "${output_file}" "${uri}" 2>&1 | info || \
+    error "aws s3 mv '${output_file}' failed"
+info "upload checksum: '${shafile}' → '${shauri}'"
+aws s3 mv "${awsargs[@]}" "${shafile}" "${shauri}" 2>&1 | info || \
+    error "aws s3 mv '${shafile}' failed"
+info "completed upload to S3 bucket '${bucket}'"
 info "finish ${command}"
 exit 0
 

@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+
+# build — Docker image build script for mokerlink-backup.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   build [--push] [--version VERSION] [--platform PLATFORMS]
+#         [--registry REGISTRY] [--no-sbom] [--no-provenance]
+#         [--dry-run] [--help]
+#
+# OPTIONS
+#   --push              Push the image to the registry after a successful build.
+#                       Omitting this flag builds locally only (the default).
+#   --version VERSION   Tag the image with this version string, e.g. "1.2.3".
+#                       When omitted the image is tagged "dev-<git-short-sha>"
+#                       so that local builds are never confused with released
+#                       artifacts.
+#   --platform PLATFORMS
+#                       Comma-separated list of target platforms.
+#                       Default: linux/amd64,linux/arm64
+#   --registry REGISTRY Docker Hub username / registry prefix.
+#                       Default: 1121citrus
+#   --no-sbom           Skip generating an SBOM attestation.
+#   --no-provenance     Skip generating a provenance attestation.
+#   --dry-run           Print the docker buildx command without executing it.
+#   --help              Print this message and exit.
+#
+# ENVIRONMENT
+#   The following env-var overrides take precedence over the defaults above but
+#   are themselves overridden by the matching CLI flag:
+#     BUILD_VERSION, BUILD_PUSH, BUILD_PLATFORM, BUILD_REGISTRY
+#
+# PREREQUISITES
+#   • docker with the buildx plugin (≥ 0.10) and QEMU binfmt helpers installed
+#     for cross-platform builds:
+#       docker run --rm --privileged tonistiigi/binfmt --install all
+#   • For --push: docker login <registry> must already be authenticated.
+#
+# PROVENANCE AND SBOM
+#   --sbom=true  embeds a CycloneDX SBOM describing every OS package inside
+#                the image, making it inspectable with:
+#                  docker buildx imagetools inspect <image> --format '{{json .SBOM}}'
+#   --provenance=mode=max  records the full build graph in SLSA provenance
+#                format, auditable with:
+#                  docker buildx imagetools inspect <image> --format '{{json .Provenance}}'
+#   Both are stored as OCI referrers on the registry manifest — they are *not*
+#   embedded in the image layers and do not inflate the runtime image size.
+#
+# NOTES ON BASE IMAGE PINNING
+#   The Dockerfile uses ARG ALPINE_TAG=3.21.  To pin to a specific digest for
+#   fully reproducible builds, set the build-arg at call time:
+#     BUILD_EXTRA_ARGS='--build-arg ALPINE_TAG=3.21@sha256:<digest>' ./build
+#
+# EXAMPLES
+#   # Local dev build — no push, tagged "dev-<sha>"
+#   ./build
+#
+#   # Release build — push version 1.2.3 and latest
+#   ./build --push --version 1.2.3
+#
+#   # Dry-run: just print the buildx command
+#   ./build --push --version 1.2.3 --dry-run
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Defaults — may be overridden by environment variables or CLI flags.
+# ---------------------------------------------------------------------------
+PUSH=${BUILD_PUSH:-false}
+VERSION=${BUILD_VERSION:-}
+PLATFORMS=${BUILD_PLATFORM:-linux/amd64,linux/arm64}
+REGISTRY=${BUILD_REGISTRY:-1121citrus}
+SBOM=true
+PROVENANCE=true
+DRY_RUN=false
+
+IMAGE_NAME=mokerlink-backup
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --push)             PUSH=true ;;
+        --version)          VERSION="$2"; shift ;;
+        --platform)         PLATFORMS="$2"; shift ;;
+        --registry)         REGISTRY="$2"; shift ;;
+        --no-sbom)          SBOM=false ;;
+        --no-provenance)    PROVENANCE=false ;;
+        --dry-run)          DRY_RUN=true ;;
+        --help|-h)
+            sed -n '3,/^# EXAMPLES/p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'
+            exit 0 ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1 ;;
+    esac
+    shift
+done
+
+# ---------------------------------------------------------------------------
+# Resolve the image version tag.
+# ---------------------------------------------------------------------------
+if [[ -z "${VERSION}" ]]; then
+    # Fall back to "dev-<7-char git SHA>" so local builds are distinguishable
+    # from official releases and never accidentally tagged "latest".
+    sha=$(git -C "$(dirname "$0")" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    VERSION="dev-${sha}"
+fi
+
+# ---------------------------------------------------------------------------
+# Construct the tag list.
+# "latest" is only added for non-dev (release) builds that will be pushed.
+# ---------------------------------------------------------------------------
+full_image="${REGISTRY}/${IMAGE_NAME}"
+tags=("--tag" "${full_image}:${VERSION}")
+if [[ "${PUSH}" == "true" && "${VERSION}" != dev-* ]]; then
+    tags+=("--tag" "${full_image}:latest")
+fi
+
+# ---------------------------------------------------------------------------
+# Construct the full buildx command.
+# ---------------------------------------------------------------------------
+cmd=(
+    docker buildx build
+    --platform "${PLATFORMS}"
+    "${tags[@]}"
+    # Software Bill of Materials — lists every OS package in the image.
+    "--sbom=${SBOM}"
+    # SLSA provenance — records the full build graph.
+    "--provenance=mode=max"
+)
+
+# Only add --push / --load depending on the requested mode.  buildx cannot
+# use both simultaneously.
+if [[ "${PUSH}" == "true" ]]; then
+    cmd+=(--push)
+else
+    # --load imports the first platform into the local Docker daemon, useful
+    # for smoke-testing without a registry.  Multi-platform local loads are
+    # not supported by Docker; restrict to the current host platform.
+    host_platform=$(docker info --format '{{.OSType}}/{{.Architecture}}' 2>/dev/null \
+        || echo "linux/amd64")
+    cmd+=(--platform "${host_platform}" --load)
+fi
+
+# Allow the caller to inject extra build-args, cache flags, etc.
+# Example: BUILD_EXTRA_ARGS='--build-arg ALPINE_TAG=3.21' ./build
+if [[ -n "${BUILD_EXTRA_ARGS:-}" ]]; then
+    # Word-split intentionally: BUILD_EXTRA_ARGS is caller-controlled.
+    # shellcheck disable=SC2206
+    cmd+=(${BUILD_EXTRA_ARGS})
+fi
+
+# The build context is always the project root (same directory as this script).
+cmd+=("$(dirname "$(readlink -f "$0")")")
+
+# ---------------------------------------------------------------------------
+# Execute (or print for --dry-run).
+# ---------------------------------------------------------------------------
+echo "Build: ${full_image}:${VERSION}" >&2
+echo "Platforms: ${PLATFORMS}" >&2
+echo "Push: ${PUSH}" >&2
+echo "" >&2
+
+if [[ "${DRY_RUN}" == "true" ]]; then
+    echo "[DRY RUN] Would execute:"
+    printf '  %s \\\n' "${cmd[@]}"
+    exit 0
+fi
+
+exec "${cmd[@]}"

@@ -65,7 +65,8 @@ jobs:
     outputs:
       base_changed: ${{ steps.check-base.outputs.changed }}
     env:
-      BASE_IMAGE: python:3.13-alpine
+      # Must match the FROM image in Dockerfile (ARG ALPINE_TAG=3.21 → alpine:3.21)
+      BASE_IMAGE: alpine:3.21
       IMAGE_NAME: >-
         ${{ secrets.DOCKERHUB_USERNAME }}/mokerlink-backup
 

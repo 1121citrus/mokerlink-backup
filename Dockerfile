@@ -51,7 +51,7 @@ RUN set -Eeux; \
 COPY --chmod=755 ./src/bin/* /usr/local/bin
 COPY --chmod=755 ./src/common-functions /usr/local/bin/
 
-HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD /usr/local/bin/healthcheck
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD /usr/local/bin/healthcheck
 
 CMD [ "/usr/local/bin/startup" ]
 

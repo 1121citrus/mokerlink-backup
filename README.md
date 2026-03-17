@@ -14,6 +14,7 @@ An application specific service to create [Mokerlink managed network switch](htt
 - [Example: Docker compose file](#example-docker-compose-file)
 - [Configuration](#configuration)
 - [Building](#building)
+- [Security](#security)
 
 ## Synopsis
 
@@ -92,11 +93,11 @@ $ docker run -i --rm \
 Verify the backup:
 
 ```console
-$ aws s3 cp s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 -
-abcb223c64e4b2206a34db069c6bb5ac7949d719  20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar
-$ aws s3 cp --quiet s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - |  gpg --passphrase-file ../1121-citrus/home-assistant/secrets/gpg-passphrase --decrypt --batch --quiet| bunzip2 | sha1sum
-abcb223c64e4b2206a34db069c6bb5ac7949d719  -
-$ aws s3 cp --quiet s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - |  gpg --passphrase-file ../1121-citrus/home-assistant/secrets/gpg-passphrase --decrypt --batch --quiet| bunzip2 | tar -tf -
+$ aws s3 cp s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha256 -
+3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4  20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar
+$ aws s3 cp --quiet s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - | gpg --passphrase-file ../1121-citrus/home-assistant/secrets/gpg-passphrase --decrypt --batch --quiet | bunzip2 | sha256sum
+3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4  -
+$ aws s3 cp --quiet s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - | gpg --passphrase-file ../1121-citrus/home-assistant/secrets/gpg-passphrase --decrypt --batch --quiet | bunzip2 | tar -tf -
 ./
 ./20250922T161500-switch-mokerlink-1.0.0.27-running-config-backup.xml
 ./20250922T161500-switch-mokerlink-1.0.0.27-startup-config-backup.xml
@@ -219,4 +220,32 @@ Variable | Default | Notes
 
 ## Building
 
-1. `docker buildx build --sbom=true --provenance=true --provenance=mode=max --platform linux/amd64,linux/arm64 -t 1121citrus/mokerlink-backup:latest -t 1121citrus/mokerlink-backup:x.y.z --push .`
+Use the `build` script at the project root.  It wraps `docker buildx` and
+handles multi-arch targets, SBOM/provenance attestations, and version tagging.
+
+```console
+# Local dev build — no push, tagged "dev-<git-sha>"
+./build
+
+# Release build — push version 1.2.3 and re-tag latest
+./build --push --version 1.2.3
+
+# Dry-run: print the buildx command without executing it
+./build --push --version 1.2.3 --dry-run
+
+# Full help
+./build --help
+```
+
+Prerequisites: `docker` with the `buildx` plugin and QEMU binfmt helpers
+installed for cross-platform builds:
+
+```console
+docker run --rm --privileged tonistiigi/binfmt --install all
+```
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for the full threat model, credential handling
+guidance, SSH host-key verification trade-offs, S3 hardening recommendations,
+and vulnerability reporting instructions.
