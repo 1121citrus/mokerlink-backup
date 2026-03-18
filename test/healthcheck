@@ -14,11 +14,11 @@ setup() {
     run_healthcheck() {
         local script=$1; shift
         docker run -i --rm ${DOCKER_RUN_ARGS:-} \
-            --entrypoint /bin/bash \
+            --entrypoint /usr/bin/env \
             -v "${whereami}/bin/get-config:/usr/local/bin/get-config:ro" \
             "$@" \
             "${IMAGE}" \
-            -c "${script}" >/dev/null 2>&1
+            bash -c "${script}" >/dev/null 2>&1
     }
     export -f run_healthcheck
 }
