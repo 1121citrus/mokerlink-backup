@@ -60,6 +60,8 @@
 #
 #   # Dry-run: just print each command
 #   ./build --dry-run
+#
+##ENDOFHELP
 
 set -euo pipefail
 
@@ -103,7 +105,7 @@ while [[ $# -gt 0 ]]; do
         --no-scan)          SCAN=false ;;
         --dry-run)          DRY_RUN=true ;;
         --help|-h)
-            sed -n '3,/^# EXAMPLES/p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'
+            sed -n '3,/^##ENDOFHELP/p' "$0" | grep '^#' | head -n -1 | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *)
             echo "Unknown option: $1" >&2
