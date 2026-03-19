@@ -37,6 +37,9 @@ function __show_config_raw__() {
     # Default 30s.  Set to 0 to disable (not recommended — the process will
     # hang indefinitely if the switch is unreachable).
     local timeout="${SSH_CONNECT_TIMEOUT:-30}"
+    # Pass parameters as environment variables rather than positional args.
+    # The heredoc delimiter is single-quoted so bash does not expand the
+    # Tcl $env(...) references inside the script before expect reads them.
     EXPECT_CONFIG="${config}" \
     EXPECT_HOSTNAME="${hostname}" \
     EXPECT_USERNAME="${username}" \
@@ -50,21 +53,37 @@ set config $env(EXPECT_CONFIG)
 set hostname $env(EXPECT_HOSTNAME)
 set username $env(EXPECT_USERNAME)
 set password $env(EXPECT_PASSWORD)
+# -F /dev/null: ignore ~/.ssh/config to prevent local settings from
+#   interfering.
+# StrictHostKeyChecking=no + UserKnownHostsFile=/dev/null: the Mokerlink
+#   firmware regenerates its host key on every factory reset; a known-hosts
+#   file would block automation after any reset.
+# +ssh-rsa: modern OpenSSH disables ssh-rsa by default; the Mokerlink
+#   firmware does not support the newer key exchange algorithms.
 spawn ssh -F /dev/null -T -o LogLevel=quiet -o StrictHostKeyChecking=no \
       -o UserKnownHostsFile=/dev/null -o HostKeyAlgorithms=+ssh-rsa \
       -o PubkeyAcceptedAlgorithms=+ssh-rsa -l $username $hostname
 match_max 100000
+# The firmware presents an application-layer login prompt over the SSH
+# channel and does not support public-key authentication.
 expect "Username: "
 send -- "$username\r"
 expect "Password: "
 send -- "$password\r"
 expect "# "
+# Disable the firmware's built-in output pager so `show` commands stream
+# their full output without --More-- interruptions.
 send -- "terminal length 0\r"
 expect "# "
 send -- "show $config-config\r"
+# log_user 1/0 brackets the config output: only the text between these two
+# calls (the actual config body) reaches the caller's stdout; the surrounding
+# session noise is suppressed.
 log_user 1
 expect "# "
 log_user 0
+# The firmware has two CLI levels: privileged exec (#) and user exec (>).
+# First `exit` steps down from # to >; second `exit` closes the session.
 send -- "exit\r"
 expect "> "
 send -- "exit\r"
@@ -93,10 +112,10 @@ elif [[ -r "${MOKERLINK_PASSWORD_FILE:=/run/secrets/mokerlink-password}" ]]; the
 fi
 [[ -n "${password}" ]] || error 'need password, or set MOKERLINK_PASSWORD or MOKERLINK_PASSWORD_FILE (default: /run/secrets/mokerlink-password) environment variable'
 
-# The raw output starts:
-#     show ${config}-config
-#     show ${config}-config
-#     SYSTEM CONFIG FILE ::= BEGIN
-# Remove the first two lines
-
+# The firmware echoes the command twice before emitting the config body:
+#   show running-config\r\n
+#   show running-config\r\n
+#   SYSTEM CONFIG FILE ::= BEGIN
+#   ...
+# Strip those two echo-back lines so only the config body reaches stdout.
 __show_config_raw__ "${config}" "${host}" "${user}" "${password}" | tail -n +3

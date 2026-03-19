@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 
+# Convenience wrapper: fetch the backup configuration from a Mokerlink switch.
+# Delegates to get-config with 'backup' as the first argument.
+# Retained for backward compatibility with callers that invoke it directly.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 bindir=$(readlink -f "$(dirname "${0}")")
 
 "${bindir}/get-config" backup "${@}"

@@ -31,11 +31,16 @@ set -o errexit -o errtrace -o nounset -o pipefail
 is_true "${DEBUG:-false}" && set -o xtrace -o verbose
 
 function has_cronjob_run() {
-    # not implemented; treat as healthy so only config/cron issues are detected
+    # Alpine's crond writes no structured execution log, so there is no
+    # lightweight way to determine when the job last ran without adding an
+    # external sentinel file.  Return true unconditionally; only cron
+    # misconfiguration (missing crond or crontab) is detected.
     true
 }
 
 function is_crond_running() {
+    # pidof is provided by busybox on Alpine; pgrep (procps) is the fallback
+    # for images where pidof is absent or restricted.
     if pidof crond >/dev/null 2>&1; then
         return 0
     elif pgrep -q crond; then
@@ -58,4 +63,3 @@ function is_healthy() {
 }
 
 is_healthy || exit 1
-

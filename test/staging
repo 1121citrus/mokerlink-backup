@@ -1,0 +1,345 @@
+#!/usr/bin/env bash
+
+# mokerlink-backup: functional tests against a real Mokerlink switch.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# These tests exercise the mokerlink-backup CLI end-to-end with no stubs.
+# Tests that require a live switch are skipped (not failed) when
+# MOKERLINK_HOST is unset or credentials are unavailable.
+#
+# Required environment (switch-dependent tests):
+#   MOKERLINK_HOST          hostname or IP of the Mokerlink switch
+#   MOKERLINK_USER          SSH username (default: remote-backup)
+#   MOKERLINK_PASSWORD      switch password, OR
+#   MOKERLINK_PASSWORD_FILE path to a file containing the password
+#
+# Usage:
+#   IMAGE=1121citrus/mokerlink-backup:1.2.3 test/staging
+#   MOKERLINK_HOST=10.0.0.1 MOKERLINK_PASSWORD=secret test/staging
+
+set -euo pipefail
+
+setup() {
+    IMAGE=${IMAGE:-1121citrus/mokerlink-backup:latest}
+
+    # Resolve password once so each test does not re-read the file.
+    local pw_file="${MOKERLINK_PASSWORD_FILE:-/run/secrets/mokerlink-password}"
+    if [[ -n "${MOKERLINK_PASSWORD:-}" ]]; then
+        switch_password="${MOKERLINK_PASSWORD}"
+    elif [[ -r "${pw_file}" ]]; then
+        switch_password=$(cat "${pw_file}")
+    else
+        switch_password=
+    fi
+
+    # Run mokerlink-backup with staging credentials and the given CLI args.
+    # No stubs: the real get-config and real switch are used.
+    run_mokerlink_backup() {
+        # shellcheck disable=SC2086
+        docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+            -e "MOKERLINK_HOST=${MOKERLINK_HOST:-}" \
+            -e "MOKERLINK_USER=${MOKERLINK_USER:-remote-backup}" \
+            -e "MOKERLINK_PASSWORD=${switch_password}" \
+            "${IMAGE}" /usr/local/bin/mokerlink-backup "$@" 2>/dev/null
+    }
+
+    export switch_password
+    export -f run_mokerlink_backup
+}
+
+# _skip prints a SKIP notice and returns 0 so the test is not counted as failed.
+_skip() {
+    echo "SKIP '${FUNCNAME[1]}': $*"
+}
+
+# _switch_available returns 0 when MOKERLINK_HOST and a password are present.
+_switch_available() {
+    [[ -n "${MOKERLINK_HOST:-}" ]] && [[ -n "${switch_password:-}" ]]
+}
+
+# ── Switch-independent tests ──────────────────────────────────────────────────
+# These exercise CLI option parsing only; no switch connection is attempted.
+
+test_staging_help() {
+    local output
+    output=$(run_mokerlink_backup --help 2>&1) && result=0 || result=$?
+    if [[ ${result} -eq 0 ]] && echo "${output}" | grep -q 'Usage:'; then
+        echo "PASS '${FUNCNAME[0]}': --help exits 0 and prints usage"
+    else
+        echo "FAIL '${FUNCNAME[0]}': --help failed (exit=${result})"
+        return 1
+    fi
+}
+
+test_staging_version() {
+    local output
+    output=$(run_mokerlink_backup --version 2>&1) && result=0 || result=$?
+    if [[ ${result} -eq 0 ]] && [[ -n "${output}" ]]; then
+        echo "PASS '${FUNCNAME[0]}': --version exits 0 and prints: ${output}"
+    else
+        echo "FAIL '${FUNCNAME[0]}': --version failed (exit=${result})"
+        return 1
+    fi
+}
+
+test_staging_unknown_option() {
+    run_mokerlink_backup --no-such-option > /dev/null 2>&1 \
+        && result=0 || result=$?
+    if [[ ${result} -ne 0 ]]; then
+        echo "PASS '${FUNCNAME[0]}': exits non-zero for unknown option"
+    else
+        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero"
+        return 1
+    fi
+}
+
+test_staging_format_invalid() {
+    run_mokerlink_backup --format badformat > /dev/null 2>&1 \
+        && result=0 || result=$?
+    if [[ ${result} -ne 0 ]]; then
+        echo "PASS '${FUNCNAME[0]}': exits non-zero for invalid --format value"
+    else
+        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero"
+        return 1
+    fi
+}
+
+test_staging_all_excluded() {
+    run_mokerlink_backup --no-running --no-startup --no-backup > /dev/null 2>&1 \
+        && result=0 || result=$?
+    if [[ ${result} -ne 0 ]]; then
+        echo "PASS '${FUNCNAME[0]}': exits non-zero when all configs excluded"
+    else
+        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero"
+        return 1
+    fi
+}
+
+# ── Switch-dependent tests ────────────────────────────────────────────────────
+# Each test skips when MOKERLINK_HOST or a password is absent.
+
+test_staging_default_tar() {
+    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    run_mokerlink_backup > "${tmpdir}/out.tar" || {
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+        rm -rf "${tmpdir}"; return 1
+    }
+    if ! tar -tf "${tmpdir}/out.tar" > /dev/null 2>&1; then
+        echo "FAIL '${FUNCNAME[0]}': output is not a valid tar archive"
+        rm -rf "${tmpdir}"; return 1
+    fi
+    local contents pass=true
+    contents=$(tar -tf "${tmpdir}/out.tar")
+    rm -rf "${tmpdir}"
+    for config in running startup backup; do
+        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+            echo "PASS '${FUNCNAME[0]}': archive contains ${config}-config-backup.xml"
+        else
+            echo "FAIL '${FUNCNAME[0]}': archive missing ${config}-config-backup.xml"
+            pass=false
+        fi
+    done
+    ${pass}
+}
+
+test_staging_running_only() {
+    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    run_mokerlink_backup --running > "${tmpdir}/out.tar" || {
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+        rm -rf "${tmpdir}"; return 1
+    }
+    local contents pass=true
+    contents=$(tar -tf "${tmpdir}/out.tar")
+    rm -rf "${tmpdir}"
+    if echo "${contents}" | grep -q 'running-config-backup.xml'; then
+        echo "PASS '${FUNCNAME[0]}': archive contains running-config-backup.xml"
+    else
+        echo "FAIL '${FUNCNAME[0]}': archive missing running-config-backup.xml"
+        pass=false
+    fi
+    for config in startup backup; do
+        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+            echo "FAIL '${FUNCNAME[0]}': archive should not contain ${config}-config-backup.xml"
+            pass=false
+        else
+            echo "PASS '${FUNCNAME[0]}': archive correctly excludes ${config}-config-backup.xml"
+        fi
+    done
+    ${pass}
+}
+
+test_staging_startup_only() {
+    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    run_mokerlink_backup --startup > "${tmpdir}/out.tar" || {
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+        rm -rf "${tmpdir}"; return 1
+    }
+    local contents pass=true
+    contents=$(tar -tf "${tmpdir}/out.tar")
+    rm -rf "${tmpdir}"
+    if echo "${contents}" | grep -q 'startup-config-backup.xml'; then
+        echo "PASS '${FUNCNAME[0]}': archive contains startup-config-backup.xml"
+    else
+        echo "FAIL '${FUNCNAME[0]}': archive missing startup-config-backup.xml"
+        pass=false
+    fi
+    for config in running backup; do
+        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+            echo "FAIL '${FUNCNAME[0]}': archive should not contain ${config}-config-backup.xml"
+            pass=false
+        else
+            echo "PASS '${FUNCNAME[0]}': archive correctly excludes ${config}-config-backup.xml"
+        fi
+    done
+    ${pass}
+}
+
+test_staging_backup_only() {
+    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    run_mokerlink_backup --backup > "${tmpdir}/out.tar" || {
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+        rm -rf "${tmpdir}"; return 1
+    }
+    local contents pass=true
+    contents=$(tar -tf "${tmpdir}/out.tar")
+    rm -rf "${tmpdir}"
+    if echo "${contents}" | grep -q 'backup-config-backup.xml'; then
+        echo "PASS '${FUNCNAME[0]}': archive contains backup-config-backup.xml"
+    else
+        echo "FAIL '${FUNCNAME[0]}': archive missing backup-config-backup.xml"
+        pass=false
+    fi
+    for config in running startup; do
+        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+            echo "FAIL '${FUNCNAME[0]}': archive should not contain ${config}-config-backup.xml"
+            pass=false
+        else
+            echo "PASS '${FUNCNAME[0]}': archive correctly excludes ${config}-config-backup.xml"
+        fi
+    done
+    ${pass}
+}
+
+test_staging_no_running() {
+    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    run_mokerlink_backup --no-running > "${tmpdir}/out.tar" || {
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+        rm -rf "${tmpdir}"; return 1
+    }
+    local contents pass=true
+    contents=$(tar -tf "${tmpdir}/out.tar")
+    rm -rf "${tmpdir}"
+    if echo "${contents}" | grep -q 'running-config-backup.xml'; then
+        echo "FAIL '${FUNCNAME[0]}': archive should not contain running-config-backup.xml"
+        pass=false
+    else
+        echo "PASS '${FUNCNAME[0]}': --no-running correctly excludes running config"
+    fi
+    for config in startup backup; do
+        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+            echo "PASS '${FUNCNAME[0]}': archive contains ${config}-config-backup.xml"
+        else
+            echo "FAIL '${FUNCNAME[0]}': archive missing ${config}-config-backup.xml"
+            pass=false
+        fi
+    done
+    ${pass}
+}
+
+test_staging_format_raw() {
+    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+    local output
+    output=$(run_mokerlink_backup --running --format raw) && result=0 || result=$?
+    if [[ ${result} -ne 0 ]]; then
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero (${result})"
+        return 1
+    fi
+    # Real Mokerlink firmware marks config blocks with '! System Version:'
+    if echo "${output}" | grep -q '! System Version:'; then
+        echo "PASS '${FUNCNAME[0]}': --format raw outputs config text with version marker"
+    else
+        echo "FAIL '${FUNCNAME[0]}': --format raw output missing '! System Version:' marker"
+        return 1
+    fi
+}
+
+test_staging_name_file() {
+    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    # shellcheck disable=SC2086
+    docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+        -e "MOKERLINK_HOST=${MOKERLINK_HOST:-}" \
+        -e "MOKERLINK_USER=${MOKERLINK_USER:-remote-backup}" \
+        -e "MOKERLINK_PASSWORD=${switch_password}" \
+        -e "MOKERLINK_BACKUP_NAME_FILE=/name/result" \
+        -v "${tmpdir}:/name" \
+        "${IMAGE}" /usr/local/bin/mokerlink-backup > /dev/null 2>/dev/null || {
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+        rm -rf "${tmpdir}"; return 1
+    }
+    local name
+    name=$(cat "${tmpdir}/result" 2>/dev/null) || {
+        echo "FAIL '${FUNCNAME[0]}': name file not written to ${tmpdir}/result"
+        rm -rf "${tmpdir}"; return 1
+    }
+    rm -rf "${tmpdir}"
+    if [[ "${name}" == *"-config-backup.tar" ]]; then
+        echo "PASS '${FUNCNAME[0]}': name file contains expected tar filename: ${name}"
+    else
+        echo "FAIL '${FUNCNAME[0]}': unexpected name file contents: '${name}'"
+        return 1
+    fi
+}
+
+run_tests() {
+    local passed=0
+    local tests=(
+        test_staging_help
+        test_staging_version
+        test_staging_unknown_option
+        test_staging_format_invalid
+        test_staging_all_excluded
+        test_staging_default_tar
+        test_staging_running_only
+        test_staging_startup_only
+        test_staging_backup_only
+        test_staging_no_running
+        test_staging_format_raw
+        test_staging_name_file
+    )
+
+    setup || { echo "ERROR: Setup failed"; return 1; }
+
+    echo "Running staging tests for mokerlink-backup..."
+    echo "=============================================="
+    if _switch_available; then
+        echo "Switch: ${MOKERLINK_HOST} (user: ${MOKERLINK_USER:-remote-backup})"
+    else
+        echo "Switch: not configured — switch-dependent tests will be skipped"
+    fi
+    echo "=============================================="
+
+    for test in "${tests[@]}"; do
+        if "${test}"; then (( ++passed )); fi
+    done
+
+    local failed=$(( ${#tests[@]} - passed ))
+    echo "=============================================="
+    echo "Results: ${passed} passed, ${failed} failed"
+    return "${failed}"
+}
+
+[[ "${BASH_SOURCE[0]}" == "$0" ]] && run_tests

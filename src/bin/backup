@@ -59,6 +59,11 @@ trap 'cleanup' EXIT
 
 # Fetch all switch configurations and stream into a named tar archive.
 
+# mokerlink-backup derives the tar filename from the switch hostname and
+# firmware version, which are not known until the SSH session completes.
+# MOKERLINK_BACKUP_NAME_FILE is a sidecar path: mokerlink-backup writes the
+# computed basename there so this script can rename the archive correctly
+# without parsing the tar stream itself.
 name_file="${workdir}/.backup-name"
 MOKERLINK_BACKUP_NAME_FILE="${name_file}" \
     mokerlink-backup > "${workdir}/backup.tar.tmp"
@@ -66,6 +71,10 @@ backup_file=$(cat "${name_file}")
 mv "${workdir}/backup.tar.tmp" "${workdir}/${backup_file}"
 cd "${workdir}"
 
+# Checksum the uncompressed tar before compression and encryption so the
+# digest covers the exact archive contents, independent of the outer
+# compression or encryption envelope.  Verification requires decrypting and
+# decompressing first; see 'Verify a backup' in the README.
 shafile="${backup_file}.sha256"
 sha256sum "${backup_file}" > "${shafile}"
 output_file="${backup_file}"
@@ -142,6 +151,8 @@ is_true "${dryrun}" && awsargs+=(--dryrun)
 uri="s3://${bucket}/${output_file}"
 shauri="s3://${bucket}/${shafile}"
 info "upload backup: '${output_file}' → '${uri}'"
+# `s3 mv` (not `cp`) deletes the local file after a successful upload,
+# preventing unbounded accumulation of large archives in the workdir.
 aws s3 mv "${awsargs[@]}" "${output_file}" "${uri}" 2>&1 | info || \
     error "aws s3 mv '${output_file}' failed"
 info "upload checksum: '${shafile}' → '${shauri}'"

@@ -137,7 +137,10 @@ user="${MOKERLINK_USER:-remote-backup}"
 password="${MOKERLINK_PASSWORD:-}"
 password_file="${MOKERLINK_PASSWORD_FILE:-/run/secrets/mokerlink-password}"
 
-# Config selection state
+# Config selection state.
+# 'true' and 'false' here are shell commands (exit 0 and exit 1), not
+# strings.  The pattern `if ! "${has_positive}"; then` runs the named
+# command and tests its exit code, making these variables act as booleans.
 has_positive=false
 exclude_running=false
 exclude_startup=false
@@ -284,6 +287,11 @@ for config in "${configs[@]}"; do
     # exposing it in the process list (visible to ps(1)).
     MOKERLINK_PASSWORD="${password}" \
         bash "${bindir}/get-config" "${config}" "${host}" "${user}" >> "${config_tmp}"
+    # Extract version from "! System Version:  v1.0.0.27":
+    #   cut -f2 -d:  → "  v1.0.0.27" (field after first colon)
+    #   sed 1        → strip leading whitespace
+    #   sed 2        → strip trailing whitespace
+    #   sed 3        → remove the leading 'v' prefix the firmware adds
     version=$(grep -m1 '^! System Version: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g' | sed 's/^v//g')
     is_true "${DEBUG}" && debug "version='$version'"
     [[ -n "${version}" ]] || error 'invalid Mokerlink configuration file - missing version'
@@ -306,6 +314,8 @@ done
 if [[ "${format}" == "tar" ]]; then
     tar_name="${timestamp}-${hostname}-mokerlink-${version}-config-backup.tar"
     is_true "${DEBUG}" && debug "tar_name='${tar_name}'"
+    # ':=' assigns empty string when the variable is unset, preventing a
+    # nounset error; the block runs only when the caller provided a path.
     if [[ -n "${MOKERLINK_BACKUP_NAME_FILE:=}" ]]; then
         printf '%s' "${tar_name}" > "${MOKERLINK_BACKUP_NAME_FILE}"
     fi
