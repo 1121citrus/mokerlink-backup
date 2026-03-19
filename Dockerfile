@@ -21,8 +21,10 @@
 ARG ALPINE_TAG=3.21
 FROM alpine:${ALPINE_TAG}
 
+ARG VERSION=dev
+
 # install required utilities and configure environment
-# hadolint ignore=DL3018,SC2261,SC3041
+# hadolint ignore=DL3018,SC2261,SC3041,DL3059
 RUN set -Eeux; \
     apk update && \
     apk upgrade --no-cache --no-interactive && \
@@ -47,6 +49,8 @@ RUN set -Eeux; \
     chmod 600 /root/.gnupg/pubring.kbx && \
     mkdir -pv /usr/local/include/bash && \
     ln -sf /usr/local/bin/common-functions /usr/local/include/bash/common-functions && \
+    mkdir -p /usr/local/share/mokerlink-backup && \
+    printf '%s\n' "${VERSION}" > /usr/local/share/mokerlink-backup/version && \
     true
 
 COPY --chmod=755 ./src/bin/* /usr/local/bin

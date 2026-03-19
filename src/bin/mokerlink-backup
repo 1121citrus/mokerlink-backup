@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Fetch Mokerlink switch configurations and stream a tar archive to stdout.
+# Download a backup of a Mokerlink managed network switch.
 #
 # Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
 #
@@ -18,37 +18,60 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # SYNOPSIS
-#   mokerlink-backup
+#   mokerlink-backup [options]
 #
 # DESCRIPTION
-#   Connects to a Mokerlink managed switch, downloads the running, startup,
-#   and backup configurations, annotates each with a header, and streams the
-#   resulting tar archive to stdout.  All progress messages go to stderr.
+#   Connects to a Mokerlink managed switch, downloads the selected
+#   configurations (running, startup, and/or backup), and outputs them as
+#   a tar archive (default) or as raw text to stdout.  All progress
+#   messages go to stderr.
 #
 #   If MOKERLINK_BACKUP_NAME_FILE is set to a writable path, the computed
 #   base filename for the tar archive is written there so callers can name
-#   the output file appropriately.
+#   the output file appropriately (tar format only).
 #
-# REQUIRED ENVIRONMENT
-#   MOKERLINK_HOST or TAILSCALE_HOST   Switch hostname or IP address.
-#   MOKERLINK_PASSWORD or MOKERLINK_PASSWORD_FILE
-#                                      Switch login password (default file:
-#                                      /run/secrets/mokerlink-password).
+# OPTIONS
+#   -?,--help              Display this help text
+#   -v,--version           Display command version
+#   -a,--all               Include all configurations (default)
+#   -r,--running           Include running configuration
+#      --no-running        Exclude running configuration
+#   -s,--startup           Include startup configuration
+#      --no-startup        Exclude startup configuration
+#   -b,--backup            Include backup configuration
+#      --no-backup         Exclude backup configuration
+#   -f,--format FMT        Output format: 'raw' or 'tar'
+#                          (env: MOKERLINK_FORMAT; default: 'tar')
+#   -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST)
+#   -u,--user USER         SSH username (env: MOKERLINK_USER;
+#                          default: remote-backup)
+#   -p,--password PW       Password (env: MOKERLINK_PASSWORD)
+#   -P,--password-file FILE
+#                          Password file (env: MOKERLINK_PASSWORD_FILE;
+#                          default: /run/secrets/mokerlink-password)
 #
-# OPTIONAL ENVIRONMENT
-#   MOKERLINK_USER             SSH username (default: remote-backup).
-#   MOKERLINK_BACKUP_NAME_FILE Path; the computed tar filename is written here.
-#   DEBUG                      Enable debug tracing (default: false).
-#   ENV                        Env-file path (default: ~/.env).
+# ENVIRONMENT
+#   MOKERLINK_HOST         Switch hostname or IP address
+#   MOKERLINK_FORMAT       Output format: 'raw' or 'tar' (default: 'tar')
+#   MOKERLINK_USER         SSH username (default: remote-backup)
+#   MOKERLINK_PASSWORD     Switch login password
+#   MOKERLINK_PASSWORD_FILE
+#                          Path to password file
+#                          (default: /run/secrets/mokerlink-password)
+#   TAILSCALE_HOST         Fallback hostname when MOKERLINK_HOST is unset
+#   MOKERLINK_BACKUP_NAME_FILE
+#                          (tar format only) Path to write computed tar filename
+#   DEBUG                  Enable debug tracing (default: false)
+#   ENV                    Env-file path (default: ~/.env)
 #
 # EXAMPLES
-#   # Fetch and save to a local file:
-#   mokerlink-backup > backup.tar
+#   # Download all configuration as a tarball:
+#   mokerlink-backup --host switch --user backup-user \
+#       --password-file secret-pw-file > switch-backup.tar
 #
-#   # Capture both the tar stream and the auto-generated filename:
-#   name_file=$(mktemp)
-#   MOKERLINK_BACKUP_NAME_FILE="${name_file}" mokerlink-backup > backup.tar
-#   mv backup.tar "$(cat "${name_file}")"
+#   # Print the running switch configuration to stdout:
+#   mokerlink-backup --host switch --user backup-user \
+#       --password-file secret-pw-file --running --format raw
 
 command=$(basename "${0}")
 bindir=$(readlink -f "$(dirname "${0}")")
@@ -63,6 +86,178 @@ set -o errexit -o errtrace -o nounset -o pipefail
 [[ -r "${ENV}" ]] && source "${ENV}"
 is_true "${DEBUG:=false}" && set -o xtrace -o verbose
 
+show_help() {
+    cat <<'EOF'
+Usage: mokerlink-backup [options]
+
+Download a backup of a Mokerlink managed network switch.
+
+Options:
+  -?,--help              Display this help text
+  -v,--version           Display command version
+  -a,--all               Include all configurations (default)
+  -r,--running           Include running configuration
+     --no-running        Exclude running configuration
+  -s,--startup           Include startup configuration
+     --no-startup        Exclude startup configuration
+  -b,--backup            Include backup configuration
+     --no-backup         Exclude backup configuration
+  -f,--format FMT        Output format: 'raw' or 'tar'
+                         (env: MOKERLINK_FORMAT; default: 'tar')
+  -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST)
+  -u,--user USER         SSH username (env: MOKERLINK_USER;
+                         default: remote-backup)
+  -p,--password PW       Password (env: MOKERLINK_PASSWORD)
+  -P,--password-file FILE
+                         Password file (env: MOKERLINK_PASSWORD_FILE;
+                         default: /run/secrets/mokerlink-password)
+
+Note: The switch is accessed via SSH using legacy algorithms required by the
+Mokerlink firmware. See the README for security considerations.
+
+Examples:
+  # Download all configuration as a tarball:
+  mokerlink-backup --host switch --user backup-user \
+      --password-file secret-pw-file > switch-backup.tar
+
+  # Print the running switch configuration to stdout:
+  mokerlink-backup --host switch --user backup-user \
+      --password-file secret-pw-file --running --format raw
+EOF
+}
+
+show_version() {
+    cat /usr/local/share/mokerlink-backup/version 2>/dev/null || echo "unknown"
+}
+
+# Defaults from environment
+format="${MOKERLINK_FORMAT:-tar}"
+host="${MOKERLINK_HOST:-${TAILSCALE_HOST:-}}"
+user="${MOKERLINK_USER:-remote-backup}"
+password="${MOKERLINK_PASSWORD:-}"
+password_file="${MOKERLINK_PASSWORD_FILE:-/run/secrets/mokerlink-password}"
+
+# Config selection state
+has_positive=false
+exclude_running=false
+exclude_startup=false
+exclude_backup=false
+select_running=
+select_startup=
+select_backup=
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -\?|--help)
+            show_help
+            exit 0
+            ;;
+        -v|--version)
+            show_version
+            exit 0
+            ;;
+        -a|--all)
+            has_positive=true
+            select_running=true
+            select_startup=true
+            select_backup=true
+            ;;
+        -r|--running)
+            has_positive=true
+            select_running=true
+            ;;
+        --no-running)
+            exclude_running=true
+            ;;
+        -s|--startup)
+            has_positive=true
+            select_startup=true
+            ;;
+        --no-startup)
+            exclude_startup=true
+            ;;
+        -b|--backup)
+            has_positive=true
+            select_backup=true
+            ;;
+        --no-backup)
+            exclude_backup=true
+            ;;
+        -f|--format)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            format="$2"
+            shift
+            ;;
+        -H|--host)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            host="$2"
+            shift
+            ;;
+        -u|--user)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            user="$2"
+            shift
+            ;;
+        -p|--password)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            password="$2"
+            shift
+            ;;
+        -P|--password-file)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            password_file="$2"
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            error "unknown option: '${1}'"
+            ;;
+        *)
+            error "unexpected argument: '${1}'"
+            ;;
+    esac
+    shift
+done
+
+# If no positive selection was made, default to all
+if ! "${has_positive}"; then
+    select_running=true
+    select_startup=true
+    select_backup=true
+fi
+
+# Apply defaults (unset → false) then exclusions
+select_running="${select_running:-false}"
+select_startup="${select_startup:-false}"
+select_backup="${select_backup:-false}"
+if "${exclude_running}"; then select_running=false; fi
+if "${exclude_startup}"; then select_startup=false; fi
+if "${exclude_backup}"; then select_backup=false; fi
+
+# Validate format
+case "${format}" in
+    raw|tar) ;;
+    *) error "unknown format: '${format}' (expected 'raw' or 'tar')" ;;
+esac
+
+# Validate at least one config selected
+if ! is_true "${select_running}" && ! is_true "${select_startup}" && ! is_true "${select_backup}"; then
+    error "no configurations selected (all excluded)"
+fi
+
+# Resolve connection parameters
+[[ -n "${host}" ]] || error 'need MOKERLINK_HOST or TAILSCALE_HOST (or --host / -H)'
+if [[ -z "${password}" ]] && [[ -r "${password_file}" ]]; then
+    password=$(cat "${password_file}")
+fi
+[[ -n "${password}" ]] || error 'need MOKERLINK_PASSWORD, --password, or --password-file (default: /run/secrets/mokerlink-password)'
+
+info "begin ${command}"
+
 timestamp=$(date +%Y%m%dT%H%M%S)
 
 # Create a work directory -- to cleanup any debris
@@ -75,22 +270,14 @@ cleanup() {
 trap 'cleanup' EXIT
 cd "${workdir}"
 
-host="${MOKERLINK_HOST:=${TAILSCALE_HOST:=}}"
-[[ -n "${host}" ]] || error 'need MOKERLINK_HOST or TAILSCALE_HOST'
-user="${MOKERLINK_USER:=remote-backup}"
-password=
-if [[ -n "${MOKERLINK_PASSWORD:=}" ]]; then
-    password="${MOKERLINK_PASSWORD}"
-elif [[ -r "${MOKERLINK_PASSWORD_FILE:=/run/secrets/mokerlink-password}" ]]; then
-    password=$(cat "${MOKERLINK_PASSWORD_FILE}")
-fi
-[[ -n "${password}" ]] || error 'need MOKERLINK_PASSWORD or MOKERLINK_PASSWORD_FILE (default: /run/secrets/mokerlink-password)'
-
-info "begin ${command}"
-
 hostname=
 version=
-for config in "running" "startup" "backup"; do
+configs=()
+is_true "${select_running}" && configs+=(running)
+is_true "${select_startup}" && configs+=(startup)
+is_true "${select_backup}" && configs+=(backup)
+
+for config in "${configs[@]}"; do
     info "download '${config}' configuration from '${host}'"
     config_tmp=$(mktemp)
     # Pass password via env var rather than as a positional arg to avoid
@@ -103,24 +290,27 @@ for config in "running" "startup" "backup"; do
     hostname=$(grep -m1 '^! System Name: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g')
     is_true "${DEBUG}" && debug "hostname='$hostname'"
     [[ -n "${hostname}" ]] || error 'invalid Mokerlink configuration file - missing hostname'
-    xml_file="${timestamp}-${hostname}-mokerlink-${version}-${config}-config-backup.xml"
-    is_true "${DEBUG}" && debug "xml_file='$xml_file'"
-    # Add header to pulled XML file
-    (echo 'SYSTEM CONFIG FILE ::= BEGIN' && \
-     echo "! Backup: ${xml_file}" && \
-     tail -n +2 "${config_tmp}") > "${xml_file}"
+    if [[ "${format}" == "tar" ]]; then
+        xml_file="${timestamp}-${hostname}-mokerlink-${version}-${config}-config-backup.xml"
+        is_true "${DEBUG}" && debug "xml_file='$xml_file'"
+        # Add header to pulled config file
+        (echo 'SYSTEM CONFIG FILE ::= BEGIN' && \
+         echo "! Backup: ${xml_file}" && \
+         tail -n +2 "${config_tmp}") > "${xml_file}"
+    else
+        cat "${config_tmp}"
+    fi
     info "completed download of '${config}' configuration from '${host}'"
 done
 
-tar_name="${timestamp}-${hostname}-mokerlink-${version}-config-backup.tar"
-is_true "${DEBUG}" && debug "tar_name='${tar_name}'"
-
-# Write the computed filename to the name file if requested
-if [[ -n "${MOKERLINK_BACKUP_NAME_FILE:=}" ]]; then
-    printf '%s' "${tar_name}" > "${MOKERLINK_BACKUP_NAME_FILE}"
+if [[ "${format}" == "tar" ]]; then
+    tar_name="${timestamp}-${hostname}-mokerlink-${version}-config-backup.tar"
+    is_true "${DEBUG}" && debug "tar_name='${tar_name}'"
+    if [[ -n "${MOKERLINK_BACKUP_NAME_FILE:=}" ]]; then
+        printf '%s' "${tar_name}" > "${MOKERLINK_BACKUP_NAME_FILE}"
+    fi
+    info "streaming tar archive: ${tar_name}"
+    tar -c -- *.xml
 fi
-
-info "streaming tar archive: ${tar_name}"
-tar -c -- *.xml
 
 info "finish ${command}"

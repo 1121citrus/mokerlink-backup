@@ -199,6 +199,7 @@ build_cmd=(
     docker buildx build
     --platform "${host_platform}"
     "${tags[@]}"
+    --build-arg "VERSION=${VERSION}"
     --load
 )
 
@@ -227,7 +228,8 @@ if [[ "${TEST}" == "true" ]]; then
         "${script_dir}/test/backup-"* \
         "${script_dir}/test/healthcheck" \
         "${script_dir}/test/bin/"*
-    (cd "${script_dir}" && run ./test/run-all)
+    # Export IMAGE so each test script targets the image just built.
+    (cd "${script_dir}" && IMAGE="${full_image}:${VERSION}" run ./test/run-all)
 fi
 
 # ---------------------------------------------------------------------------
@@ -261,6 +263,7 @@ if [[ "${PUSH}" == "true" ]]; then
         docker buildx build
         --platform "${PLATFORMS}"
         "${tags[@]}"
+        --build-arg "VERSION=${VERSION}"
         "--sbom=${SBOM}"
         "${provenance_flag}"
         --push
