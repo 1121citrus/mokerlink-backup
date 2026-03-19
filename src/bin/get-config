@@ -26,7 +26,7 @@ source /usr/local/include/bash/common-functions
 set -o errexit -o errtrace -o nounset -o pipefail
 
 expect_args=()
-is_true "${DEBUG:=false}" && expect_args+=(-d) || true
+if is_true "${DEBUG:=false}"; then expect_args+=(-d); fi
 
 function __show_config_raw__() {
     local config="${1:?Need configuration name}"

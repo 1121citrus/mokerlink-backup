@@ -37,6 +37,7 @@ timestamp=$(date +%Y%m%dT%H%M%S)
 workdir=$(mktemp -d)
 # shellcheck disable=SC2329
 cleanup() {
+    # shellcheck disable=SC2317
     rm -rf "${workdir}" >/dev/null 2>&1 || true
 }
 trap 'cleanup' EXIT

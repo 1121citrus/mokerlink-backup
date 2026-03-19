@@ -54,7 +54,7 @@ clean-credentials() {
     sed -E 's/(GPG_PASSPHRASE|MOKERLINK_PASSWORD)='"'"'.*'"'"'$/\1='"'**REDACTED**'"'/' 
 }
 info "create env file ${ENV}"
-cat "${ENV}" | clean-credentials | info
+clean-credentials < "${ENV}" | info
 # shellcheck disable=SC1090
 source "${ENV}"
 

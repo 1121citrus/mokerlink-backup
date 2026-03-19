@@ -13,6 +13,7 @@ setup() {
     chmod +x "${whereami}/bin/"*
 
     run_backup() {
+        # shellcheck disable=SC2086
         docker run -i --rm ${DOCKER_RUN_ARGS:-} \
             -e "PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
             -v "${whereami}/bin:/test/bin:ro" \
@@ -65,8 +66,8 @@ test_backup_missing_password() {
 }
 
 test_backup_tailscale_fallback() {
-    local output
-    output=$(run_backup \
+    local _output
+    _output=$(run_backup \
         -e MOKERLINK_HOST= \
         -e TAILSCALE_HOST=tailscale-host \
         -e AWS_S3_BUCKET_NAME=test-bucket \
@@ -80,8 +81,8 @@ test_backup_tailscale_fallback() {
 }
 
 test_backup_password_file() {
-    local output
-    output=$(run_backup \
+    local _output
+    _output=$(run_backup \
         -e AWS_S3_BUCKET_NAME=test-bucket \
         -e MOKERLINK_HOST=fake-host \
         -e MOKERLINK_PASSWORD= \
@@ -111,7 +112,7 @@ run_tests() {
     echo "========================================================"
 
     for test in "${tests[@]}"; do
-        "${test}" && ((passed++)) || :
+        if "${test}"; then (( ++passed )); fi
     done
 
     local failed=$(( ${#tests[@]} - passed ))

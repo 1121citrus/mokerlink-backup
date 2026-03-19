@@ -13,6 +13,7 @@ setup() {
 
     run_healthcheck() {
         local script=$1; shift
+        # shellcheck disable=SC2086
         docker run -i --rm ${DOCKER_RUN_ARGS:-} \
             --entrypoint /usr/bin/env \
             -v "${whereami}/bin/get-config:/usr/local/bin/get-config:ro" \
@@ -78,7 +79,7 @@ run_tests() {
     echo "================================="
 
     for test in "${tests[@]}"; do
-        "${test}" && ((passed++)) || :
+        if "${test}"; then (( ++passed )); fi
     done
 
     local failed=$(( ${#tests[@]} - passed ))

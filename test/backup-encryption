@@ -13,6 +13,7 @@ setup() {
     chmod +x "${whereami}/bin/"*
 
     run_backup() {
+        # shellcheck disable=SC2086
         docker run -i --rm ${DOCKER_RUN_ARGS:-} \
             -e "PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
             -e AWS_S3_BUCKET_NAME=test-bucket \
@@ -95,7 +96,7 @@ run_tests() {
     echo "============================================"
 
     for test in "${tests[@]}"; do
-        "${test}" && ((passed++)) || :
+        if "${test}"; then (( ++passed )); fi
     done
 
     local failed=$(( ${#tests[@]} - passed ))

@@ -38,7 +38,7 @@ function has_cronjob_run() {
 function is_crond_running() {
     if pidof crond >/dev/null 2>&1; then
         return 0
-    elif ps aux | grep -Eq '[c]rond( |$)'; then
+    elif pgrep -q crond; then
         return 0
     else
         error crond is not running
