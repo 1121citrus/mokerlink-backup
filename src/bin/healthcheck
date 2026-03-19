@@ -46,7 +46,7 @@ function is_crond_running() {
 }
 
 function is_crontab_configured() {
-    if (crontab -l | grep -q " ${bindir}/backup 2>&1"); then
+    if (crontab -l | grep -q '/backup'); then
         return 0
     else
         error crontab is not configured

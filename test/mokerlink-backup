@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+
+# mokerlink-backup: test src/bin/mokerlink-backup directly.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+set -euo pipefail
+
+setup() {
+    whereami=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+    IMAGE=${IMAGE:-1121citrus/mokerlink-backup:latest}
+    chmod +x "${whereami}/bin/"*
+
+    run_mokerlink_backup() {
+        # shellcheck disable=SC2086
+        docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+            -e "PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            -e MOKERLINK_HOST=fake-host \
+            -e MOKERLINK_PASSWORD=testpass \
+            -v "${whereami}/bin:/test/bin:ro" \
+            -v "${whereami}/bin/get-config:/usr/local/bin/get-config:ro" \
+            "$@" \
+            "${IMAGE}" /usr/local/bin/mokerlink-backup 2>/dev/null
+    }
+    export -f run_mokerlink_backup
+}
+
+test_mokerlink_backup_missing_host() {
+    run_mokerlink_backup -e MOKERLINK_HOST= -e TAILSCALE_HOST= > /dev/null \
+        && result=0 || result=$?
+    if [[ ${result} -ne 0 ]]; then
+        echo "PASS '${FUNCNAME[0]}': exits non-zero when neither MOKERLINK_HOST nor TAILSCALE_HOST is set"
+    else
+        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero"
+        return 1
+    fi
+}
+
+test_mokerlink_backup_tailscale_fallback() {
+    run_mokerlink_backup -e MOKERLINK_HOST= -e TAILSCALE_HOST=tailscale-host > /dev/null \
+        && result=0 || result=$?
+    if [[ ${result} -eq 0 ]]; then
+        echo "PASS '${FUNCNAME[0]}': TAILSCALE_HOST accepted when MOKERLINK_HOST is unset"
+    else
+        echo "FAIL '${FUNCNAME[0]}': should have succeeded with TAILSCALE_HOST set"
+        return 1
+    fi
+}
+
+test_mokerlink_backup_missing_password() {
+    run_mokerlink_backup \
+        -e MOKERLINK_PASSWORD= \
+        -e MOKERLINK_PASSWORD_FILE=/nonexistent \
+        > /dev/null && result=0 || result=$?
+    if [[ ${result} -ne 0 ]]; then
+        echo "PASS '${FUNCNAME[0]}': exits non-zero when no password is available"
+    else
+        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero"
+        return 1
+    fi
+}
+
+test_mokerlink_backup_streams_tar() {
+    if run_mokerlink_backup | tar -t > /dev/null; then
+        echo "PASS '${FUNCNAME[0]}': stdout is a valid tar archive"
+    else
+        echo "FAIL '${FUNCNAME[0]}': stdout is not a valid tar archive"
+        return 1
+    fi
+}
+
+test_mokerlink_backup_name_file() {
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    run_mokerlink_backup \
+        -e MOKERLINK_BACKUP_NAME_FILE=/name/result \
+        -v "${tmpdir}:/name" > /dev/null || {
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+        rm -rf "${tmpdir}"
+        return 1
+    }
+    local name
+    name=$(cat "${tmpdir}/result" 2>/dev/null) || {
+        echo "FAIL '${FUNCNAME[0]}': name file not written"
+        rm -rf "${tmpdir}"
+        return 1
+    }
+    rm -rf "${tmpdir}"
+    if [[ "${name}" == *"-config-backup.tar" ]]; then
+        echo "PASS '${FUNCNAME[0]}': name file contains expected tar filename: ${name}"
+    else
+        echo "FAIL '${FUNCNAME[0]}': unexpected name file contents: '${name}'"
+        return 1
+    fi
+}
+
+test_mokerlink_backup_archive_contents() {
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    run_mokerlink_backup > "${tmpdir}/out.tar" || {
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+        rm -rf "${tmpdir}"
+        return 1
+    }
+    local contents
+    contents=$(tar -tf "${tmpdir}/out.tar")
+    rm -rf "${tmpdir}"
+    local pass=true
+    for config in running startup backup; do
+        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+            echo "PASS '${FUNCNAME[0]}': archive contains ${config}-config-backup.xml"
+        else
+            echo "FAIL '${FUNCNAME[0]}': archive missing ${config}-config-backup.xml"
+            pass=false
+        fi
+    done
+    ${pass}
+}
+
+run_tests() {
+    local passed=0
+    local tests=(
+        test_mokerlink_backup_missing_host
+        test_mokerlink_backup_tailscale_fallback
+        test_mokerlink_backup_missing_password
+        test_mokerlink_backup_streams_tar
+        test_mokerlink_backup_name_file
+        test_mokerlink_backup_archive_contents
+    )
+
+    setup || { echo "ERROR: Setup failed"; return 1; }
+
+    echo "Running tests for mokerlink-backup..."
+    echo "======================================"
+
+    for test in "${tests[@]}"; do
+        if "${test}"; then (( ++passed )); fi
+    done
+
+    local failed=$(( ${#tests[@]} - passed ))
+    echo "======================================"
+    echo "Results: ${passed} passed, ${failed} failed"
+    return "${failed}"
+}
+
+[[ "${BASH_SOURCE[0]}" == "$0" ]] && run_tests

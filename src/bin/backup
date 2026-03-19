@@ -8,12 +8,12 @@
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
@@ -29,35 +29,12 @@ set -o errexit -o errtrace -o nounset -o pipefail
 # shellcheck disable=SC1090
 [[ -r "${ENV}" ]] && source "${ENV}"
 is_true "${DEBUG:=false}" && set -o xtrace -o verbose
-# future: we may perform additional startup checks here
-
-timestamp=$(date +%Y%m%dT%H%M%S)
-
-# Create a work directory -- to cleanup any debris
-workdir=$(mktemp -d)
-# shellcheck disable=SC2329
-cleanup() {
-    # shellcheck disable=SC2317
-    rm -rf "${workdir}" >/dev/null 2>&1 || true
-}
-trap 'cleanup' EXIT
-cd "${workdir}"
 
 export AWS_CONFIG_FILE="${AWS_CONFIG_FILE:=/run/secrets/aws-config}"
 
 bucket="${AWS_S3_BUCKET_NAME:=}"
 [[ -n "${bucket}" ]] || error 'need AWS_S3_BUCKET_NAME'
 dryrun="${AWS_DRYRUN:=false}"
-host="${MOKERLINK_HOST:=${TAILSCALE_HOST:=}}"
-[[ -n "${host}" ]] || error 'need MOKERLINK_HOST or TAILSCALE_HOST'
-user="${MOKERLINK_USER:=remote-backup}"
-password=
-if [[ -n "${MOKERLINK_PASSWORD:=}" ]]; then
-    password="${MOKERLINK_PASSWORD}"
-elif [[ -r "${MOKERLINK_PASSWORD_FILE:=/run/secrets/mokerlink-password}" ]]; then
-    password=$(cat "${MOKERLINK_PASSWORD_FILE}")
-fi
-[[ -n "${password}" ]] || error 'need MOKERLINK_PASSWORD or MOKERLINK_PASSWORD_FILE (default: /run/secrets/mokerlink-password)'
 
 gpg_encrypt=false
 gpg_args=(--symmetric --cipher-algo "${GPG_CIPHER_ALGO:=aes256}" --batch)
@@ -71,30 +48,25 @@ fi
 
 info "begin ${command}"
 
-for config in "running" "startup" "backup"; do
-    info "download '${config}' configuration from '${host}'"
-    config_tmp=$(mktemp)
-    # Pass password via env var rather than as a positional arg to avoid
-    # exposing it in the process list (visible to ps(1)).
-    MOKERLINK_PASSWORD="${password}" \
-        bash "${bindir}/get-config" "${config}" "${host}" "${user}" >> "${config_tmp}"
-    version=$(grep -m1 '^! System Version: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g' | sed 's/^v//g')
-    is_true "${DEBUG}" && debug "version='$version'"
-    [[ -n "${version}" ]] || error 'invalid Mokerlink configuration file - missing version'
-    hostname=$(grep -m1 '^! System Name: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g')
-    is_true "${DEBUG}" && debug "hostname='$hostname'"
-    [[ -n "${hostname}" ]] || error 'invalid Mokerlink configuration file - missing hostname'
-    backup_file="${timestamp}-${hostname}-mokerlink-${version}-${config}-config-backup.xml"
-    is_true "${DEBUG}" && debug "backup_file='$backup_file'"
-    # Add header to pulled XML file
-    (echo 'SYSTEM CONFIG FILE ::= BEGIN' && \
-     echo "! Backup: ${backup_file}" && \
-     tail -n +2 "${config_tmp}") > "${backup_file}"
-    info "completed download of '${config}' configuration from '${host}'"
-done
-backup_file="${timestamp}-${hostname}-mokerlink-${version}-config-backup.tar"
+# Create a work directory for compression, encryption, and upload staging.
+workdir=$(mktemp -d)
+# shellcheck disable=SC2329
+cleanup() {
+    # shellcheck disable=SC2317
+    rm -rf "${workdir}" >/dev/null 2>&1 || true
+}
+trap 'cleanup' EXIT
+
+# Fetch all switch configurations and stream into a named tar archive.
+
+name_file="${workdir}/.backup-name"
+MOKERLINK_BACKUP_NAME_FILE="${name_file}" \
+    mokerlink-backup > "${workdir}/backup.tar.tmp"
+backup_file=$(cat "${name_file}")
+mv "${workdir}/backup.tar.tmp" "${workdir}/${backup_file}"
+cd "${workdir}"
+
 shafile="${backup_file}.sha256"
-tar -cf "${backup_file}" -- *.xml
 sha256sum "${backup_file}" > "${shafile}"
 output_file="${backup_file}"
 
@@ -104,13 +76,13 @@ case "${COMPRESSION:=none}" in
         bzip2 -9 --keep --quiet --stdout  <"${output_file}" >"${output_file}.bz2"
         output_file="${output_file}.bz2"
         ;;
- 
+
     bzip3)
         info "compressing backup with bzip3: ${output_file}.bz3"
         bzip3 --batch --keep --stdout "${output_file}" >"${output_file}.bz3"
         output_file="${output_file}.bz3"
         ;;
- 
+
     gz | gzip)
         info "compressing backup with gzip --best --no-name --quiet --synchronous: ${output_file}.gz"
         gzip --best --no-name --quiet --synchronous <"${output_file}" >"${output_file}.gz"
@@ -178,4 +150,3 @@ aws s3 mv "${awsargs[@]}" "${shafile}" "${shauri}" 2>&1 | info || \
 info "completed upload to S3 bucket '${bucket}'"
 info "finish ${command}"
 exit 0
-

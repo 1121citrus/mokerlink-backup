@@ -176,12 +176,14 @@ if [[ "${LINT}" == "true" ]]; then
         src/bin/get-running-config \
         src/bin/get-startup-config \
         src/bin/healthcheck \
+        src/bin/mokerlink-backup \
         src/bin/startup \
         test/run-all \
         test/backup-required-vars \
         test/backup-success \
         test/backup-encryption \
         test/healthcheck \
+        test/mokerlink-backup \
         test/bin/*)
 fi
 

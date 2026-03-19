@@ -10,6 +10,7 @@ set -euo pipefail
 whereami=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 
 status=0
+"${whereami}/mokerlink-backup"      || status=1
 "${whereami}/backup-required-vars"  || status=1
 "${whereami}/backup-success"        || status=1
 "${whereami}/backup-encryption"     || status=1
