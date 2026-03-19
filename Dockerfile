@@ -22,26 +22,27 @@ ARG ALPINE_TAG=3.21
 FROM alpine:${ALPINE_TAG}
 
 # install required utilities and configure environment
+# hadolint ignore=DL3018,SC2261,SC3041
 RUN set -Eeux; \
     apk update && \
     apk upgrade --no-cache --no-interactive && \
     apk add --no-cache --no-interactive --upgrade \
-        aws-cli>2.27 \
-        bash>5.2 \
-        bzip2>1.0 \
-        bzip3>1.5 \
-        expect>5.45 \
-        gnupg>2.4 \
-        gzip>1.14 \
-        lzop>1.04 \
-        openssh>10.0 \
-        openssl>3.3 \
-        pigz>2.8 \
-        pixz>1.0 \
-        xz>5.6 \
-        zip>3.0 \
+        'aws-cli>2.20' \
+        'bash>5.2' \
+        'bzip2>1.0' \
+        'bzip3>1.3' \
+        'expect>5.45' \
+        'gnupg>2.4' \
+        'gzip>1.12' \
+        'lzop>1.04' \
+        'openssh>9.8' \
+        'openssl>3.3' \
+        'pigz>2.8' \
+        'pixz>1.0' \
+        'xz>5.6' \
+        'zip>3.0' \
         && \
-    mkdir -pv -m 700 /root/.gnupg /root/.ssh && \
+    install -d -m 700 /root/.gnupg /root/.ssh && \
     touch /root/.gnupg/pubring.kbx && \
     chmod 600 /root/.gnupg/pubring.kbx && \
     mkdir -pv /usr/local/include/bash && \
