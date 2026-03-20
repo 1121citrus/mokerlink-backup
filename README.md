@@ -307,5 +307,6 @@ docker run --rm --privileged tonistiigi/binfmt --install all
 ## Security
 
 See [SECURITY.md](SECURITY.md) for the full threat model, credential handling
-guidance, SSH host-key verification trade-offs, S3 hardening recommendations,
-and vulnerability reporting instructions.
+guidance, SSH host-key verification trade-offs, and S3 hardening recommendations.
+Report vulnerabilities through the
+[GitHub Security tab](https://github.com/1121citrus/mokerlink-backup/security).

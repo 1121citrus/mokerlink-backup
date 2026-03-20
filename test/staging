@@ -16,16 +16,29 @@
 #   MOKERLINK_PASSWORD_FILE path to a file containing the password
 #
 # Usage:
+#   test/staging <image>
 #   IMAGE=1121citrus/mokerlink-backup:1.2.3 test/staging
-#   MOKERLINK_HOST=10.0.0.1 MOKERLINK_PASSWORD=secret test/staging
+#   test/staging 1121citrus/mokerlink-backup:1.2.3
+#   MOKERLINK_HOST=10.0.0.1 MOKERLINK_PASSWORD=secret test/staging <image>
 
 set -euo pipefail
 
 setup() {
-    IMAGE=${IMAGE:-1121citrus/mokerlink-backup:latest}
+    # $1 overrides the IMAGE env var; neither has a default.
+    IMAGE="${1:-${IMAGE:-}}"
+    [[ -n "${IMAGE}" ]] || {
+        echo "ERROR: IMAGE is not set" >&2
+        echo "       Usage: test/staging <image>  or  IMAGE=<image> test/staging" >&2
+        return 1
+    }
+    docker image inspect "${IMAGE}" > /dev/null 2>&1 || {
+        echo "ERROR: image not found locally: ${IMAGE}" >&2
+        echo "       Pull or build it first: ./build --no-scan" >&2
+        return 1
+    }
 
     # Resolve password once so each test does not re-read the file.
-    local pw_file="${MOKERLINK_PASSWORD_FILE:-/run/secrets/mokerlink-password}"
+    local pw_file="${MOKERLINK_PASSWORD_FILE:-"${HOME}/.secrets/mokerlink-password"}"
     if [[ -n "${MOKERLINK_PASSWORD:-}" ]]; then
         switch_password="${MOKERLINK_PASSWORD}"
     elif [[ -r "${pw_file}" ]]; then
@@ -45,8 +58,58 @@ setup() {
             "${IMAGE}" /usr/local/bin/mokerlink-backup "$@" 2>/dev/null
     }
 
+    # Verify the image contains the command before any test runs.
+    # Exit 127 from individual tests is confusing; a clear setup failure
+    # is not.  This catches a stale 'latest' image before publishing a new
+    # version — rebuild with: IMAGE=... ./build --no-scan
+    if ! docker run --rm "${IMAGE}" \
+            test -x /usr/local/bin/mokerlink-backup > /dev/null 2>&1; then
+        echo "ERROR: /usr/local/bin/mokerlink-backup not found in ${IMAGE}" >&2
+        echo "       Rebuild: ./build --no-scan" >&2
+        return 1
+    fi
+
+    # Run the legacy backup script directly with staging credentials.
+    # stderr is merged with stdout so callers capture all log output.
+    # shellcheck disable=SC2120  # "$@" is intentional: callers may pass extra docker flags
+    run_backup() {
+        local aws_mounts=()
+        [[ -r "${AWS_CONFIG_FILE:-}" ]] && \
+            aws_mounts+=(-v "${AWS_CONFIG_FILE}:/run/secrets/aws-config:ro")
+        # shellcheck disable=SC2086
+        docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+            -e "MOKERLINK_HOST=${MOKERLINK_HOST:-}" \
+            -e "MOKERLINK_USER=${MOKERLINK_USER:-remote-backup}" \
+            -e "MOKERLINK_PASSWORD=${switch_password}" \
+            -e "AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME:-}" \
+            -e "AWS_DRYRUN=${AWS_DRYRUN:-false}" \
+            -e "COMPRESSION=${COMPRESSION:-none}" \
+            "${aws_mounts[@]}" \
+            "$@" \
+            "${IMAGE}" /usr/local/bin/backup 2>&1
+    }
+
+    # Start the full service container (startup → crond → backup) detached.
+    # Prints the container ID to stdout; caller is responsible for stop and rm.
+    run_service_detached() {
+        local aws_mounts=()
+        [[ -r "${AWS_CONFIG_FILE:-}" ]] && \
+            aws_mounts+=(-v "${AWS_CONFIG_FILE}:/run/secrets/aws-config:ro")
+        # shellcheck disable=SC2086
+        docker run -d ${DOCKER_RUN_ARGS:-} \
+            -e "MOKERLINK_HOST=${MOKERLINK_HOST:-}" \
+            -e "MOKERLINK_USER=${MOKERLINK_USER:-remote-backup}" \
+            -e "MOKERLINK_PASSWORD=${switch_password}" \
+            -e "AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME:-}" \
+            -e "AWS_DRYRUN=${AWS_DRYRUN:-false}" \
+            -e "COMPRESSION=${COMPRESSION:-none}" \
+            "${aws_mounts[@]}" \
+            "$@" \
+            "${IMAGE}"
+    }
+
     export switch_password
-    export -f run_mokerlink_backup
+    export -f run_mokerlink_backup run_backup run_service_detached
 }
 
 # _skip prints a SKIP notice and returns 0 so the test is not counted as failed.
@@ -57,6 +120,20 @@ _skip() {
 # _switch_available returns 0 when MOKERLINK_HOST and a password are present.
 _switch_available() {
     [[ -n "${MOKERLINK_HOST:-}" ]] && [[ -n "${switch_password:-}" ]]
+}
+
+# _aws_available returns 0 when AWS_S3_BUCKET_NAME is set and at least one
+# form of AWS credentials is present (config file or access-key env vars).
+_aws_available() {
+    [[ -n "${AWS_S3_BUCKET_NAME:-}" ]] && {
+        [[ -r "${AWS_CONFIG_FILE:-/run/secrets/aws-config}" ]] || \
+        [[ -n "${AWS_ACCESS_KEY_ID:-}" ]]
+    }
+}
+
+# _service_available returns 0 when both switch and AWS are configured.
+_service_available() {
+    _switch_available && _aws_available
 }
 
 # ── Switch-independent tests ──────────────────────────────────────────────────
@@ -304,6 +381,83 @@ test_staging_name_file() {
     fi
 }
 
+# ── Cron / service-mode tests ─────────────────────────────────────────────────
+# Both tests require switch access AND AWS credentials.
+# Set AWS_DRYRUN=true to exercise the full pipeline without real S3 writes.
+
+# test_staging_backup_direct: run the `backup` script once, directly.
+# Verifies the full mokerlink-backup → compress → (encrypt) → S3 pipeline.
+# Expected duration: 30–90 s depending on switch response and compression.
+test_staging_backup_direct() {
+    _service_available || { _skip "switch or AWS not configured"; return 0; }
+
+    printf '  starting backup (AWS_DRYRUN=%s; may take up to 2m)...\n' \
+        "${AWS_DRYRUN:-false}" >&2
+
+    local tmpfile result=0 elapsed=0
+    tmpfile=$(mktemp)
+    run_backup > "${tmpfile}" 2>&1 &
+    local bgpid=$!
+    while kill -0 "${bgpid}" 2>/dev/null; do
+        sleep 10
+        elapsed=$(( elapsed + 10 ))
+        printf '  [%ds] backup in progress...\n' "${elapsed}" >&2
+    done
+    wait "${bgpid}" && result=0 || result=$?
+
+    local output
+    output=$(cat "${tmpfile}")
+    rm -f "${tmpfile}"
+
+    if [[ ${result} -ne 0 ]]; then
+        echo "FAIL '${FUNCNAME[0]}': backup exited non-zero (${result})"
+        printf '%s\n' "${output}" | tail -5 >&2
+        return 1
+    fi
+    if echo "${output}" | grep -q 'finish backup'; then
+        echo "PASS '${FUNCNAME[0]}': backup completed in ${elapsed}s (AWS_DRYRUN=${AWS_DRYRUN:-false})"
+    else
+        echo "FAIL '${FUNCNAME[0]}': 'finish backup' not found in output"
+        printf '%s\n' "${output}" | tail -5 >&2
+        return 1
+    fi
+}
+
+# test_staging_cron_fires: start the full service container and wait for the
+# cron daemon to trigger a complete backup cycle.
+# Expected duration: up to 4 m (≤60 s to first cron tick + backup run time).
+test_staging_cron_fires() {
+    _service_available || { _skip "switch or AWS not configured"; return 0; }
+
+    # Schedule every minute so the first fire is at most 60 s away.
+    local container_id
+    container_id=$(run_service_detached -e "CRON_EXPRESSION=* * * * *")
+    printf '  container %s started; waiting for first cron backup (up to 4m)...\n' \
+        "${container_id:0:12}" >&2
+
+    local elapsed=0 timeout=240 interval=10 found=false last_log
+    while [[ ${elapsed} -lt ${timeout} ]]; do
+        sleep "${interval}"
+        elapsed=$(( elapsed + interval ))
+        if docker logs "${container_id}" 2>&1 | grep -q 'finish backup'; then
+            found=true
+            break
+        fi
+        last_log=$(docker logs --tail 1 "${container_id}" 2>&1)
+        printf '  [%ds] waiting... (last: %s)\n' "${elapsed}" "${last_log}" >&2
+    done
+
+    docker stop "${container_id}" > /dev/null 2>&1
+    docker rm   "${container_id}" > /dev/null 2>&1
+
+    if "${found}"; then
+        echo "PASS '${FUNCNAME[0]}': cron backup completed within ${elapsed}s (AWS_DRYRUN=${AWS_DRYRUN:-false})"
+    else
+        echo "FAIL '${FUNCNAME[0]}': backup did not complete within ${timeout}s"
+        return 1
+    fi
+}
+
 run_tests() {
     local passed=0
     local tests=(
@@ -319,9 +473,11 @@ run_tests() {
         test_staging_no_running
         test_staging_format_raw
         test_staging_name_file
+        test_staging_backup_direct
+        test_staging_cron_fires
     )
 
-    setup || { echo "ERROR: Setup failed"; return 1; }
+    setup "${@}" || { echo "ERROR: Setup failed"; return 1; }
 
     echo "Running staging tests for mokerlink-backup..."
     echo "=============================================="
@@ -342,4 +498,92 @@ run_tests() {
     return "${failed}"
 }
 
-[[ "${BASH_SOURCE[0]}" == "$0" ]] && run_tests
+main() {
+    # ── Preflight: evaluate what will actually be touched ─────────────────────
+    local image="${1:-${IMAGE:-<not set>}}"
+    local bucket="${AWS_S3_BUCKET_NAME:-}"
+    local pw_file="${MOKERLINK_PASSWORD_FILE:-"${HOME}/.secrets/mokerlink-password"}"
+    local aws_cfg="${AWS_CONFIG_FILE:-"${HOME}/.secrets/aws-config"}"
+
+    local will_touch_switch=false will_touch_aws=false
+    [[ -n "${MOKERLINK_HOST:-}" ]] && \
+        { [[ -n "${MOKERLINK_PASSWORD:-}" ]] || [[ -r "${pw_file}" ]]; } && \
+        will_touch_switch=true
+    [[ -n "${bucket}" ]] && \
+        { [[ -r "${aws_cfg}" ]] || [[ -n "${AWS_ACCESS_KEY_ID:-}" ]]; } && \
+        will_touch_aws=true
+
+    # ── Warning header ────────────────────────────────────────────────────────
+    echo "================================================================"
+    echo " WARNING: test/staging exercises live infrastructure"
+    echo "================================================================"
+    echo ""
+    echo "  Image:    ${image}"
+    echo ""
+
+    if "${will_touch_switch}"; then
+        echo "  Switch:   ${MOKERLINK_HOST}" \
+             "(user: ${MOKERLINK_USER:-remote-backup})"
+        echo "            SSH sessions will be opened to this host."
+    else
+        echo "  Switch:   not configured — switch tests will be skipped"
+    fi
+    echo ""
+
+    # ── Bucket safety check (may override AWS_DRYRUN) ────────────────────────
+    # For buckets that do not look like test or staging, default to dry-run
+    # to prevent accidental production writes.  AWS_DRYRUN=false overrides.
+    local caution_bucket=false
+    if [[ -n "${bucket}" ]] && \
+       [[ "${bucket}" != test.* ]] && \
+       [[ "${bucket}" != staging.* ]]; then
+        caution_bucket=true
+        if [[ "${AWS_DRYRUN:-}" != "false" ]]; then
+            AWS_DRYRUN=true
+            export AWS_DRYRUN
+        fi
+    fi
+
+    if "${will_touch_aws}"; then
+        echo "  S3:       s3://${bucket}"
+        if [[ "${AWS_DRYRUN:-false}" == "true" ]]; then
+            echo "  Dry-run:  true — no files will be written to S3"
+        else
+            echo "  Dry-run:  false — FILES WILL BE WRITTEN TO THIS BUCKET"
+        fi
+    else
+        echo "  S3:       not configured — service tests will be skipped"
+    fi
+    echo ""
+
+    if "${caution_bucket}"; then
+        echo "  !! CAUTION !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        echo "  !! AWS_S3_BUCKET_NAME='${bucket}'"
+        echo "  !! does not start with 'test.' or 'staging.'."
+        if [[ "${AWS_DRYRUN:-false}" == "true" ]]; then
+            echo "  !! AWS_DRYRUN forced to 'true'."
+            echo "  !! Set AWS_DRYRUN=false to allow real S3 writes."
+        else
+            echo "  !! AWS_DRYRUN=false: real files WILL be written to S3."
+        fi
+        echo "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        echo ""
+    fi
+
+    # ── Confirmation ──────────────────────────────────────────────────────────
+    # Prompt only when real systems would be touched; default is to abort.
+    if "${will_touch_switch}" || "${will_touch_aws}"; then
+        printf 'Type "yes" to proceed, or press Enter to abort: '
+        local response
+        read -r response
+        echo ""
+        if [[ "${response}" != "yes" ]]; then
+            echo "Aborted."
+            return 1
+        fi
+    fi
+
+    run_tests "$@"
+}
+
+[[ "${BASH_SOURCE[0]}" == "$0" ]] && main "$@"
