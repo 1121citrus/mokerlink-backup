@@ -9,6 +9,7 @@
 #   build [--push] [--version VERSION] [--platform PLATFORMS]
 #         [--registry REGISTRY] [--no-sbom] [--no-provenance]
 #         [--no-lint] [--no-test] [--no-scan]
+#         [--advise [ADVISEMENTS]] [--no-advise]
 #         [--dry-run] [--help]
 #
 # OPTIONS
@@ -27,7 +28,14 @@
 #   --no-provenance     Skip generating a provenance attestation (push only).
 #   --no-lint           Skip hadolint Dockerfile check and shellcheck.
 #   --no-test           Skip running the test suite.
-#   --no-scan           Skip the Trivy vulnerability scan.
+#   --no-scan           Skip the Trivy vulnerability scan (gating).
+#                       Also skips advisements (stage 5) by default; pass --advise
+#                       after --no-scan to keep the advisory scans.
+#   --advise [ADVISEMENTS]
+#                       Run advisory scans. Optional comma-delimited list of advisements:
+#                       'grype', 'scout', 'dive', or any combination, e.g. 'grype,scout,dive'
+#                       (default if no list given: 'grype,scout').
+#   --no-advise         Skip all advisory scans (Grype, Docker Scout, and Dive).
 #   --dry-run           Print each command without executing it.
 #   --help              Print this message and exit.
 #
@@ -35,7 +43,7 @@
 #   The following env-var overrides take precedence over the defaults above but
 #   are themselves overridden by the matching CLI flag:
 #     BUILD_VERSION, BUILD_PUSH, BUILD_PLATFORM, BUILD_REGISTRY
-#     BUILD_LINT, BUILD_TEST, BUILD_SCAN
+#     BUILD_LINT, BUILD_TEST, BUILD_SCAN, BUILD_ADVISE
 #
 # PREREQUISITES
 #   • docker with the buildx plugin (≥ 0.10)
@@ -49,7 +57,11 @@
 #   2. Build  — single-platform --load into local Docker daemon
 #   3. Test   — ./test/run-all against the locally loaded image
 #   4. Scan   — Trivy CRITICAL/HIGH image scan (blocking)
-#   5. Push   — multi-platform rebuild + push to registry (only with --push)
+#   5. Advise — multiple advisory scans (advisory only; never blocks the build)
+#              a) Grype   — full-severity scan
+#              b) Scout   — Docker Scout CVE scan
+#              c) Dive    — image layer analysis
+#   6. Push   — multi-platform rebuild + push to registry (only with --push)
 #
 # EXAMPLES
 #   # Local dev cycle — lint, build, test, scan
@@ -77,6 +89,10 @@ PROVENANCE=true
 LINT=${BUILD_LINT:-true}
 TEST=${BUILD_TEST:-true}
 SCAN=${BUILD_SCAN:-true}
+ADVISE_GRYPE=true
+ADVISE_SCOUT=true
+ADVISE_DIVE=false
+_ADVISE_EXPLICIT=false   # set true when --advise or --no-advise is passed
 DRY_RUN=false
 
 IMAGE_NAME=mokerlink-backup
@@ -88,6 +104,10 @@ SHELLCHECK_IMAGE=koalaman/shellcheck
 SHELLCHECK_TAG=v0.10.0
 TRIVY_IMAGE=aquasec/trivy
 TRIVY_TAG=0.62.1
+GRYPE_IMAGE=anchore/grype
+GRYPE_TAG=v0.87.0
+DIVE_IMAGE=wagoodman/dive
+DIVE_TAG=latest
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -103,6 +123,34 @@ while [[ $# -gt 0 ]]; do
         --no-lint)          LINT=false ;;
         --no-test)          TEST=false ;;
         --no-scan)          SCAN=false ;;
+        --advise)
+            _ADVISE_EXPLICIT=true
+            # Check if next arg looks like an advisement list (no -- prefix)
+            if [[ $# -gt 1 && ! "$2" =~ ^-- ]]; then
+                advisements="$2"; shift
+            else
+                advisements="grype,scout"
+            fi
+            # Parse the comma-delimited list
+            ADVISE_GRYPE=false
+            ADVISE_SCOUT=false
+            ADVISE_DIVE=false
+            IFS=',' read -ra adv_list <<< "$advisements"
+            for adv in "${adv_list[@]}"; do
+                case "$adv" in
+                    grype)  ADVISE_GRYPE=true ;;
+                    scout)  ADVISE_SCOUT=true ;;
+                    dive)   ADVISE_DIVE=true ;;
+                    *)      echo "Unknown advisement: $adv" >&2; exit 1 ;;
+                esac
+            done
+            ;;
+        --no-advise)
+            ADVISE_GRYPE=false
+            ADVISE_SCOUT=false
+            ADVISE_DIVE=false
+            _ADVISE_EXPLICIT=true
+            ;;
         --dry-run)          DRY_RUN=true ;;
         --help|-h)
             sed -n '3,/^##ENDOFHELP/p' "$0" | grep '^#' | head -n -1 | sed 's/^# \{0,1\}//'
@@ -113,6 +161,13 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+# --no-scan implies --no-advise unless --advise was given explicitly.
+if [[ "${SCAN}" == "false" && "${_ADVISE_EXPLICIT}" == "false" ]]; then
+    ADVISE_GRYPE=false
+    ADVISE_SCOUT=false
+    ADVISE_DIVE=false
+fi
 
 # ---------------------------------------------------------------------------
 # Resolve the image version tag.
@@ -247,11 +302,49 @@ if [[ "${SCAN}" == "true" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Stage 5: Push (multi-platform)
+# Stage 5a: Advise (Grype — non-gating)
+# Runs a full-severity Grype scan and prints findings to the build log.
+# Never sets a non-zero exit code due to vulnerability findings; the build
+# continues regardless of what Grype reports.
+# ---------------------------------------------------------------------------
+if [[ "${ADVISE_GRYPE}" == "true" ]]; then
+    echo "==> Stage 5a: Advise (Grype) ${full_image}:${VERSION}" >&2
+    run docker run --rm \
+        -v /var/run/docker.sock:/var/run/docker.sock:ro \
+        "${GRYPE_IMAGE}:${GRYPE_TAG}" \
+            "${full_image}:${VERSION}" || true
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 5b: Advise (Docker Scout — non-gating)
+# Runs Docker Scout and prints findings to the build log.
+# Never sets a non-zero exit code; the build continues regardless.
+# ---------------------------------------------------------------------------
+if [[ "${ADVISE_SCOUT}" == "true" ]]; then
+    echo "==> Stage 5b: Advise (Scout) ${full_image}:${VERSION}" >&2
+    run docker scout cves "${full_image}:${VERSION}" || true
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 5c: Advise (Dive — non-gating)
+# Analyzes image layers for bloat, optimization opportunities, and composition.
+# Never sets a non-zero exit code; the build continues regardless.
+# ---------------------------------------------------------------------------
+if [[ "${ADVISE_DIVE}" == "true" ]]; then
+    echo "==> Stage 5c: Advise (Dive) ${full_image}:${VERSION}" >&2
+    run docker run --rm \
+        -v /var/run/docker.sock:/var/run/docker.sock:ro \
+        "${DIVE_IMAGE}:${DIVE_TAG}" \
+            --ci \
+            "${full_image}:${VERSION}" || true
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 6: Push (multi-platform)
 # Only runs when --push is specified; rebuilds for all target platforms.
 # ---------------------------------------------------------------------------
 if [[ "${PUSH}" == "true" ]]; then
-    echo "==> Stage 5: Push ${full_image}:${VERSION} (${PLATFORMS})" >&2
+    echo "==> Stage 6: Push ${full_image}:${VERSION} (${PLATFORMS})" >&2
 
     if [[ "${PROVENANCE}" == "true" ]]; then
         provenance_flag="--provenance=mode=max"
