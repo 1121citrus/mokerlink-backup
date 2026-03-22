@@ -19,7 +19,7 @@ Trusted components: the container host, the Docker daemon, the S3 bucket
 
 The `get-config` script connects to the switch with:
 
-```
+```text
 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 ```
 
@@ -38,10 +38,11 @@ format, so host-key pinning is not currently feasible.
 - The backup files themselves are optionally GPG-encrypted at rest in S3, so a
   configuration stolen in transit is the primary residual risk.
 
-**Recommendation:** Mount a `~/.ssh/known_hosts` file into the container
-(read-only) containing the switch's host key fingerprint and set
-`SSH_KNOWN_HOSTS_FILE` if the switch SSH server ever begins advertising a stable
-key.
+**Recommendation:** If the switch SSH server ever begins advertising a stable
+host key, modify `get-config` to pass
+`-o UserKnownHostsFile=/root/.ssh/known_hosts -o StrictHostKeyChecking=yes`
+and mount a `~/.ssh/known_hosts` file into the container (read-only) containing
+the switch's host key fingerprint.  This would require a code change.
 
 ## Legacy SSH algorithms
 
@@ -53,9 +54,9 @@ connections to the switch and do not affect other SSH usage in the container.
 ## Credential handling
 
 | Credential | Env var (less secure) | File (recommended) |
-|---|---|---|
+| --- | --- | --- |
 | Switch password | `MOKERLINK_PASSWORD` | `MOKERLINK_PASSWORD_FILE` (default: `/run/secrets/mokerlink-password`) |
-| GPG passphrase  | `GPG_PASSPHRASE`     | `GPG_PASSPHRASE_FILE` (default: `/run/secrets/gpg-passphrase`) |
+| GPG passphrase | `GPG_PASSPHRASE` | `GPG_PASSPHRASE_FILE` (default: `/run/secrets/gpg-passphrase`) |
 | AWS credentials | — | `AWS_CONFIG_FILE` (default: `/run/secrets/aws-config`) |
 
 **Prefer Docker secrets or read-only bind mounts over environment variables.**
@@ -81,7 +82,7 @@ For every backup run the script computes a SHA-256 digest of the uncompressed
 `.tar` archive and uploads it alongside the (possibly compressed and encrypted)
 backup file:
 
-```
+```text
 s3://<bucket>/<timestamp>-<host>-mokerlink-<ver>-config-backup.tar.sha256
 s3://<bucket>/<timestamp>-<host>-mokerlink-<ver>-config-backup.tar[.<ext>[.gpg]]
 ```

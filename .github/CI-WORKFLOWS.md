@@ -54,6 +54,7 @@ Artifact retention: 1 day (sufficient for the duration of the workflow).
 
 Runs in parallel with the scan job. Downloads the artifact, loads the image, and executes the full test suite via `test/run-all`:
 
+- `mokerlink-backup` — validates CLI option parsing, config selection flags, and output formats
 - `backup-required-vars` — validates required environment variables
 - `backup-success` — verifies successful backup operation
 - `backup-encryption` — tests backup encryption
@@ -95,7 +96,7 @@ Runs only when test and scan both pass, and only on version tags or the staging 
 
 ## Execution Flow
 
-```
+```text
 On push to main/staging or PR to main
     ↓
 [Lint] — hadolint + shellcheck
@@ -127,5 +128,5 @@ On push to main/staging or PR to main
 - `Dockerfile` — Container build definition
 - `src/` — Application shell scripts
 - `test/run-all` — Test runner
-- `test/backup-*`, `test/healthcheck` — Individual test scripts
+- `test/mokerlink-backup`, `test/backup-*`, `test/healthcheck` — Individual test scripts
 - `test/bin/` — Mock binaries used by tests

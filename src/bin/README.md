@@ -7,7 +7,7 @@ Scripts installed to `/usr/local/bin` inside the container image.
 ## Script inventory
 
 | Script | Role | Entry point |
-|---|---|---|
+| --- | --- | --- |
 | `mokerlink-backup` | **Primary CLI** — downloads switch configs, streams tar or raw text to stdout | user / cron |
 | `get-config` | SSH engine — opens an `expect`-driven SSH session and captures one config type | called by `mokerlink-backup` |
 | `get-running-config` | Wrapper: `get-config running "$@"` | backward-compat |
@@ -23,7 +23,7 @@ Scripts installed to `/usr/local/bin` inside the container image.
 
 ### CLI mode (primary)
 
-```
+```text
 caller
   └─ mokerlink-backup [opts]
         ├─ get-config running   host user   (via bash, MOKERLINK_PASSWORD in env)
@@ -36,7 +36,7 @@ caller
 
 ### Legacy service mode
 
-```
+```text
 Docker CMD
   └─ startup
         └─ crond (daemon)
@@ -86,7 +86,7 @@ modes.  `expect` is the only practical way to automate this interaction.
 ### SSH flags
 
 | Flag | Reason |
-|---|---|
+| --- | --- |
 | `-F /dev/null` | Ignore `~/.ssh/config`; prevent local settings from interfering |
 | `StrictHostKeyChecking=no` | Firmware regenerates the host key on every factory reset |
 | `UserKnownHostsFile=/dev/null` | Prevents stale known-hosts entries from blocking automation |
@@ -99,7 +99,7 @@ modes.  `expect` is the only practical way to automate this interaction.
 3. `terminal length 0` — disable firmware paging so `show` output is not broken up with `--More--` prompts
 4. `send "show <type>-config\r"`
 5. `log_user 1` — start capturing output
-6. Wait for `# ` prompt (end of config body)
+6. Wait for `#` prompt (end of config body)
 7. `log_user 0` — stop capturing
 8. Two-level exit: `exit` from privileged exec (`#`) to user exec (`>`), then `exit` to close the session
 9. The raw output includes two echo-back lines before `SYSTEM CONFIG FILE ::= BEGIN`; `tail -n +3` strips them
@@ -150,7 +150,8 @@ creating additional copies of the (potentially large) tar file in the workdir.
 
 Container entrypoint for legacy service mode.  Writes all runtime configuration
 to `~/.env` (the file `crond` and `backup` source at startup), installs a
-crontab entry, and execs `crond -f` as PID 1.
+crontab entry, and runs `crond -l 2 -f` in the foreground.  The startup script
+itself remains PID 1; `crond` runs as a child process.
 
 The `.env` write-and-source pattern is needed because `crond` runs jobs with a
 minimal environment; writing the configuration to a file that each job sources
@@ -175,7 +176,7 @@ the last run time without an external sentinel file.
 ## Adding a new configuration type
 
 1. Add the new type name to the `^(running|startup|backup)$` regex in
-   `get-config` (line ~77).
+   `get-config`.
 2. Add a corresponding `get-<type>-config` wrapper if needed for backward
    compatibility.
 3. Add test coverage in `test/mokerlink-backup` and `test/staging`.

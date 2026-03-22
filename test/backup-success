@@ -85,6 +85,42 @@ test_backup_xz_contents() {
     _assert_contains "xz extension" ".xz" "${output}"
 }
 
+test_backup_bzip3_contents() {
+    local output
+    output=$(run_backup -e COMPRESSION=bzip3) || {
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"; return 1
+    }
+    _assert_contains "bzip3 logged" "compressing backup with bzip3" "${output}"
+    _assert_contains "bzip3 extension" ".bz3" "${output}"
+}
+
+test_backup_lzop_contents() {
+    local output
+    output=$(run_backup -e COMPRESSION=lzop) || {
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"; return 1
+    }
+    _assert_contains "lzop logged" "compressing backup with lzop" "${output}"
+    _assert_contains "lzop extension" ".lzo" "${output}"
+}
+
+test_backup_pigz_contents() {
+    local output
+    output=$(run_backup -e COMPRESSION=pigz) || {
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"; return 1
+    }
+    _assert_contains "pigz logged" "compressing backup with pigz" "${output}"
+    _assert_contains "pigz extension" ".pgz" "${output}"
+}
+
+test_backup_pixz_contents() {
+    local output
+    output=$(run_backup -e COMPRESSION=pixz) || {
+        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"; return 1
+    }
+    _assert_contains "pixz logged" "compressing backup with pixz" "${output}"
+    _assert_contains "pixz extension" ".pxz" "${output}"
+}
+
 test_backup_invalid_compression() {
     run_backup -e COMPRESSION=invalid > /dev/null && result=0 || result=$?
     if [[ ${result} -ne 0 ]]; then
@@ -131,7 +167,11 @@ run_tests() {
         test_backup_no_compression
         test_backup_zip_contents
         test_backup_bzip2_contents
+        test_backup_bzip3_contents
         test_backup_gzip_contents
+        test_backup_lzop_contents
+        test_backup_pigz_contents
+        test_backup_pixz_contents
         test_backup_xz_contents
         test_backup_invalid_compression
         test_backup_archive_contains_configs

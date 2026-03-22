@@ -64,8 +64,8 @@ Options:
 Connection parameters may also be supplied via environment variables (see
 [CLI parameters](#cli-parameters) below).
 
-> **Note on `-h`:** `-h` is reserved for `--help`.  Use `-H` or `--host`
-> to supply the switch hostname.
+> **Note on `-h`:** There is no `-h` flag — `-H` (uppercase) is the host option.
+> Use `-?` or `--help` to display help text.
 
 ## Examples
 
@@ -161,14 +161,23 @@ Example log output:
 [INFO] 20250922T120714 startup export AWS_S3_BUCKET_NAME='backups-bucket'
 [INFO] 20250922T120714 startup export COMPRESSION='bzip2'
 [INFO] 20250922T120714 startup export CRON_EXPRESSION='*/15 * * * *'
+[INFO] 20250922T120714 startup export DEBUG='false'
 [INFO] 20250922T120714 startup export GPG_CIPHER_ALGO='aes256'
 [INFO] 20250922T120714 startup export GPG_PASSPHRASE='**REDACTED**'
+[INFO] 20250922T120714 startup export GPG_PASSPHRASE_FILE='/run/secrets/gpg-passphrase'
 [INFO] 20250922T120714 startup export MOKERLINK_HOST='switch'
 [INFO] 20250922T120714 startup export MOKERLINK_PASSWORD='**REDACTED**'
+[INFO] 20250922T120714 startup export MOKERLINK_PASSWORD_FILE='/run/secrets/mokerlink-password'
 [INFO] 20250922T120714 startup export MOKERLINK_USER='remote-backup'
-[INFO] 20250922T160714 startup installing cron.d entry: /usr/local/bin/backup
-[INFO] 20250922T160714 startup crontab: */15 * * * * /usr/local/bin/backup 2>&1
-[INFO] 20250922T160714 startup handing the reins over to cron daemon
+[INFO] 20250922T120714 startup export TAILSCALE_HOST=''
+[INFO] 20250922T120714 startup export TZ='UTC'
+[INFO] 20250922T120714 startup installing cron.d entry: /usr/local/bin/backup
+[INFO] 20250922T120714 startup mkdir: created directory '/var/spool/cron'
+[INFO] 20250922T120714 startup mkdir: created directory '/var/spool/cron/crontabs'
+[INFO] 20250922T120714 startup mode of '/var/spool/cron/crontabs' changed from 0700 to 0755
+[INFO] 20250922T120714 startup mode of '/var/spool/cron/crontabs/root' changed from 0644 to 0600
+[INFO] 20250922T120714 startup crontab: */15 * * * * /usr/local/bin/backup 2>&1
+[INFO] 20250922T120714 startup handing the reins over to cron daemon
    .
    .
    .
@@ -212,7 +221,6 @@ services:
       - AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME:-backup-bucket}
       - COMPRESSION=xz
       - CRON_EXPRESSION=${CRON_EXPRESSION:-15 3 * * *}
-      - GPG_ENCRYPT=true
       - MOKERLINK_HOST=switch
       - MOKERLINK_USER=remote-backup
       - TZ=${TZ:-US/Eastern}
