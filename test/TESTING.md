@@ -21,6 +21,7 @@ interaction is replaced by the stub at `test/bin/get-config`.
 
 | Script | What it tests |
 | --- | --- |
+| `build-options` | `build` option parsing for `--advice` alias and `--cache`; `staging --help` coverage for `--scan`/`--advise` |
 | `mokerlink-backup` | CLI option parsing, flag validation, tar/raw output format, config selection flags (`-r`, `-s`, `-b`, `--no-*`) |
 | `backup-required-vars` | `backup` script rejects missing `AWS_S3_BUCKET_NAME`, `MOKERLINK_HOST`, and password; accepts `TAILSCALE_HOST` fallback and password file |
 | `backup-success` | `backup` script succeeds for each supported compression algorithm; tar archive contains all three config files |
@@ -74,6 +75,16 @@ switch (local network or Tailscale).
 | `AWS_ACCESS_KEY_ID` | Service tests (backup, cron) | AWS access key; use instead of config file if preferred |
 | `AWS_SECRET_ACCESS_KEY` | Service tests (backup, cron) | AWS secret key (required with `AWS_ACCESS_KEY_ID`) |
 | `AWS_DRYRUN` | Service tests (backup, cron) | Set to `false` for real S3 writes; defaults to `true` for non-test buckets |
+| `STAGING_SCAN` | Staging scanner phase | `true`/`false`; controls Trivy scan (default: `true`) |
+| `STAGING_ADVISE` | Staging scanner phase | `true`/`false`; controls Grype advisement (default: `true`) |
+
+### Staging scanner options
+
+`test/staging` also supports scanner controls:
+
+- `--scan` / `--no-scan`
+- `--advise [grype,scout,dive,all]`
+- `--no-advise`
 
 ### Running
 

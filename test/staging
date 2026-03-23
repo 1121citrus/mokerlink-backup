@@ -16,12 +16,41 @@
 #   MOKERLINK_PASSWORD_FILE path to a file containing the password
 #
 # Usage:
-#   test/staging <image>
+#   test/staging [options] [image]
 #   IMAGE=1121citrus/mokerlink-backup:1.2.3 test/staging
-#   test/staging 1121citrus/mokerlink-backup:1.2.3
+#   test/staging --no-scan 1121citrus/mokerlink-backup:1.2.3
 #   MOKERLINK_HOST=10.0.0.1 MOKERLINK_PASSWORD=secret test/staging <image>
+#
+# Options:
+#   --image IMAGE        Docker image under test
+#   --scan               Run Trivy scan (default)
+#   --no-scan            Skip Trivy scan; implies --no-advise unless --advise is set
+#   --advise [LIST]      Run advisory scans: grype,scout,dive,all (default: grype,scout)
+#   --no-advise          Disable advisory scans
+#   --yes                Skip interactive confirmation
+#   --help|-h            Show this help and exit
 
 set -euo pipefail
+
+_SCAN="${STAGING_SCAN:-true}"
+_ADVISE_GRYPE="${STAGING_ADVISE:-true}"
+_ADVISE_SCOUT=true
+_ADVISE_DIVE=false
+_ADVISE_EXPLICIT=false
+_YES=false
+
+TRIVY_IMAGE=aquasec/trivy
+TRIVY_TAG=0.62.1
+GRYPE_IMAGE=anchore/grype
+GRYPE_TAG=v0.87.0
+DIVE_IMAGE=wagoodman/dive
+DIVE_TAG=latest
+
+show_help() {
+    sed -n '/^# Usage:/,/^set -/p' "$0" \
+        | grep '^#' \
+        | sed 's/^# \{0,1\}//'
+}
 
 setup() {
     # $1 overrides the IMAGE env var; neither has a default.
@@ -481,6 +510,43 @@ run_tests() {
 
     echo "Running staging tests for mokerlink-backup..."
     echo "=============================================="
+    echo "Scans: Trivy=${_SCAN} Grype=${_ADVISE_GRYPE} Scout=${_ADVISE_SCOUT} Dive=${_ADVISE_DIVE}"
+    echo "=============================================="
+
+    if [[ "${_SCAN}" == "true" ]]; then
+        echo "==> Scan: Trivy ${IMAGE}" >&2
+        docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
+                --exit-code 1 \
+                --ignore-unfixed \
+                --severity HIGH,CRITICAL \
+                "${IMAGE}"
+    fi
+
+    if [[ "${_ADVISE_GRYPE}" == "true" ]]; then
+        echo "==> Advise: Grype ${IMAGE}" >&2
+        docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            "${GRYPE_IMAGE}:${GRYPE_TAG}" \
+            "${IMAGE}" || true
+    fi
+
+    if [[ "${_ADVISE_SCOUT}" == "true" ]]; then
+        echo "==> Advise: Scout ${IMAGE}" >&2
+        docker scout cves "${IMAGE}" || true
+    fi
+
+    if [[ "${_ADVISE_DIVE}" == "true" ]]; then
+        echo "==> Advise: Dive ${IMAGE}" >&2
+        docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            "${DIVE_IMAGE}:${DIVE_TAG}" \
+            --ci \
+            "${IMAGE}" || true
+    fi
+
+    echo "=============================================="
     if _switch_available; then
         echo "Switch: ${MOKERLINK_HOST} (user: ${MOKERLINK_USER:-remote-backup})"
     else
@@ -499,6 +565,75 @@ run_tests() {
 }
 
 main() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --image)
+                IMAGE="$2"
+                shift
+                ;;
+            --scan)
+                _SCAN=true
+                ;;
+            --no-scan)
+                _SCAN=false
+                ;;
+            --advise|--advice)
+                _ADVISE_EXPLICIT=true
+                if [[ $# -gt 1 && ! "$2" =~ ^-- ]]; then
+                    advisements="$2"
+                    shift
+                else
+                    advisements="grype,scout"
+                fi
+                _ADVISE_GRYPE=false
+                _ADVISE_SCOUT=false
+                _ADVISE_DIVE=false
+                IFS=',' read -ra adv_list <<< "$advisements"
+                for adv in "${adv_list[@]}"; do
+                    case "$adv" in
+                        grype)  _ADVISE_GRYPE=true ;;
+                        scout)  _ADVISE_SCOUT=true ;;
+                        dive)   _ADVISE_DIVE=true ;;
+                        all)    _ADVISE_GRYPE=true; _ADVISE_SCOUT=true; _ADVISE_DIVE=true ;;
+                        *)      echo "Unknown advisement: $adv" >&2; exit 1 ;;
+                    esac
+                done
+                ;;
+            --no-advise)
+                _ADVISE_EXPLICIT=true
+                _ADVISE_GRYPE=false
+                _ADVISE_SCOUT=false
+                _ADVISE_DIVE=false
+                ;;
+            --yes)
+                _YES=true
+                ;;
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            -*)
+                echo "Unknown option: $1" >&2
+                exit 1
+                ;;
+            *)
+                if [[ -z "${IMAGE:-}" ]]; then
+                    IMAGE="$1"
+                else
+                    echo "Unexpected argument: $1" >&2
+                    exit 1
+                fi
+                ;;
+        esac
+        shift
+    done
+
+    if [[ "${_SCAN}" == "false" && "${_ADVISE_EXPLICIT}" == "false" ]]; then
+        _ADVISE_GRYPE=false
+        _ADVISE_SCOUT=false
+        _ADVISE_DIVE=false
+    fi
+
     # ── Preflight: evaluate what will actually be touched ─────────────────────
     local image="${1:-${IMAGE:-<not set>}}"
     local bucket="${AWS_S3_BUCKET_NAME:-}"
@@ -572,7 +707,7 @@ main() {
 
     # ── Confirmation ──────────────────────────────────────────────────────────
     # Prompt only when real systems would be touched; default is to abort.
-    if "${will_touch_switch}" || "${will_touch_aws}"; then
+    if [[ "${_YES}" != "true" ]] && { "${will_touch_switch}" || "${will_touch_aws}"; }; then
         printf 'Type "yes" to proceed, or press Enter to abort: '
         local response
         read -r response

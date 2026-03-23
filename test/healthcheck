@@ -42,6 +42,7 @@ test_healthcheck_healthy_with_crond() {
     local script
     script='mkdir -p /var/spool/cron/crontabs'
     script+=' && printf "%s\n" "* * * * * /usr/local/bin/backup 2>&1" > /var/spool/cron/crontabs/root'
+    script+=' && chmod 0600 /var/spool/cron/crontabs/root'
     script+=' && crond -l 2 && sleep 0.5'
     script+=' && /usr/local/bin/healthcheck'
     run_healthcheck "${script}" && result=0 || result=$?

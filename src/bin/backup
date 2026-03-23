@@ -39,7 +39,8 @@ dryrun="${AWS_DRYRUN:=false}"
 gpg_encrypt=false
 gpg_args=(--symmetric --cipher-algo "${GPG_CIPHER_ALGO:=aes256}" --batch)
 if [[ -n "${GPG_PASSPHRASE:=}" ]]; then
-    gpg_args+=(--passphrase "${GPG_PASSPHRASE}")
+    # Use passphrase-fd to avoid exposing passphrase in process list (argv)
+    gpg_args+=(--passphrase-fd 3)
     gpg_encrypt=true
 elif [[ -r "${GPG_PASSPHRASE_FILE:=/run/secrets/gpg-passphrase}" ]]; then
     gpg_args+=(--passphrase-file "${GPG_PASSPHRASE_FILE}")
@@ -139,7 +140,13 @@ esac
 
 if "${gpg_encrypt}"; then
     info "encrypting backup with 'gpg' (GnuPG)"
-    gpg "${gpg_args[@]}" --output "${output_file}.gpg" "${output_file}"
+    if [[ -n "${GPG_PASSPHRASE:=}" ]]; then
+        # Pass passphrase via fd 3 to avoid exposing it in process list
+        gpg "${gpg_args[@]}" --output "${output_file}.gpg" "${output_file}" 3<<<"${GPG_PASSPHRASE}"
+    else
+        # No passphrase, just use passphrase-file
+        gpg "${gpg_args[@]}" --output "${output_file}.gpg" "${output_file}"
+    fi
     output_file="${output_file}.gpg"
 fi
 

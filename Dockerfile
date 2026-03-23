@@ -18,7 +18,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-ARG ALPINE_TAG=3.21
+ARG ALPINE_TAG=3.22
 FROM alpine:${ALPINE_TAG}
 
 ARG VERSION=dev
@@ -41,6 +41,8 @@ RUN set -Eeux; \
         'openssl>3.3' \
         'pigz>2.8' \
         'pixz>1.0' \
+        'py3-cryptography>44.0' \
+        'py3-urllib3>1.25' \
         'xz>5.6' \
         'zip>3.0' \
         && \

@@ -67,4 +67,4 @@ chmod -c 0600 /var/spool/cron/crontabs/root | info
 info "crontab: $(cat /var/spool/cron/crontabs/root)"
 
 info "handing the reins over to cron daemon"
-crond -l 2 -f
+exec crond -l 2 -f

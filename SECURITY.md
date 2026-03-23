@@ -133,7 +133,7 @@ Recommended S3 bucket configuration:
 
 ## Dependency provenance
 
-The Docker image is built on `alpine:3.21` (official Docker Hub image).  All
+The Docker image is built on `alpine:3.22` (official Docker Hub image).  All
 packages are installed from the Alpine package index pinned to version
 constraints in the `Dockerfile`.  The CI pipeline runs a
 [Trivy](https://github.com/aquasecurity/trivy) vulnerability scan after every

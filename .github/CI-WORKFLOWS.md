@@ -130,3 +130,8 @@ On push to main/staging or PR to main
 - `test/run-all` — Test runner
 - `test/mokerlink-backup`, `test/backup-*`, `test/healthcheck` — Individual test scripts
 - `test/bin/` — Mock binaries used by tests
+
+## Local Workflow Parity
+
+- `./build` supports `--advice` (alias for `--advise`) and `--cache` for one-run scanner cache controls.
+- `test/staging` supports `--scan`, `--no-scan`, `--advise`, and `--no-advise` for live-image validation.

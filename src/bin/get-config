@@ -47,6 +47,9 @@ function __show_config_raw__() {
     EXPECT_TIMEOUT="${timeout}" \
     /usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
 log_user 0
+# Increase match_max to accommodate large switch configs (ACLs, routing tables, port definitions).
+# Default 2000 is too small for enterprise-scale Mikrotik switches.
+set match_max 1000000
 # Use the caller-supplied timeout; 0 means no timeout (not recommended).
 set timeout $env(EXPECT_TIMEOUT)
 set config $env(EXPECT_CONFIG)
@@ -63,7 +66,6 @@ set password $env(EXPECT_PASSWORD)
 spawn ssh -F /dev/null -T -o LogLevel=quiet -o StrictHostKeyChecking=no \
       -o UserKnownHostsFile=/dev/null -o HostKeyAlgorithms=+ssh-rsa \
       -o PubkeyAcceptedAlgorithms=+ssh-rsa -l $username $hostname
-match_max 100000
 # The firmware presents an application-layer login prompt over the SSH
 # channel and does not support public-key authentication.
 expect "Username: "
