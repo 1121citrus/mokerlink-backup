@@ -86,6 +86,50 @@ switch (local network or Tailscale).
 - `--advise [grype,scout,dive,all]`
 - `--no-advise`
 
+### Dive layer analysis (`.dive-ci`)
+
+When `--advise dive` (or `--advise all`) is passed, the image is analyzed by
+[Dive](https://github.com/wagoodman/dive) in CI mode (`--ci`).  Dive reads
+pass/fail thresholds from `.dive-ci` at the project root.  Without a config
+file, Dive falls back to its built-in defaults, which are too strict for
+this image.
+
+#### Threshold choices
+
+| Rule | Dive default | This project | Reason |
+|---|---|---|---|
+| `lowestEfficiency` | 0.9 | 0.9 | Kept at default — no change needed |
+| `highestWastedBytes` | 20 MB | disabled | Absolute byte count is unpredictable across Alpine releases; see below |
+| `highestUserWastedPercent` | 10% (0.1) | 20% (0.2) | `apk upgrade` creates inherent waste; see below |
+
+**`highestWastedBytes: disabled`**
+
+The `Dockerfile` runs `apk upgrade` to pull security fixes into the
+`alpine:3.22` base layer.  Upgraded packages shadow the copies that shipped
+in the base image; Dive counts those originals as wasted bytes because they
+are still present in the base layer but inaccessible.  The exact byte count
+varies with each Alpine point release (which changes what is pre-installed),
+so a fixed byte limit would cause spurious failures on routine base-image
+bumps.  Disabling the rule sidesteps that brittleness while `highestUserWastedPercent`
+still provides a percentage-based safety net.
+
+**`highestUserWastedPercent: 0.20`**
+
+The default 0.10 (10%) is too tight for Alpine images that run `apk upgrade`.
+The upgrade step replaces base-image files in the user layer, and the resulting
+waste fraction depends on how many packages were upgraded.  0.20 (20%) provides
+a buffer large enough to absorb expected upgrade waste while still catching
+genuinely bloated images such as accidentally committed caches or unnecessary
+tool installations.
+
+#### Config file mechanics
+
+`.dive-ci` lives at the project root alongside the `Dockerfile`.  When Dive
+is invoked from `build` or `test/staging`, the file is mounted read-only into
+the Dive container (`-v …/.dive-ci:/.dive-ci:ro`) and loaded via
+`--ci-config /.dive-ci`.  If the file is absent, Dive uses its built-in
+defaults.
+
 ### Running
 
 ```console

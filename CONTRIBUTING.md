@@ -23,7 +23,7 @@ The `build` script runs all stages: lint → build → test → scan → push.
 Run the test suite against a locally built image:
 
 ```bash
-./build --no-scan --no-push
+./build --no-scan
 ```
 
 Or manually:

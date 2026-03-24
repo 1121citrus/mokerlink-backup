@@ -151,4 +151,5 @@ docker buildx imagetools inspect 1121citrus/mokerlink-backup:<version> \
 
 ## Reporting vulnerabilities
 
-Report security issues to [jim@hanlonsoftware.com](mailto:jim@hanlonsoftware.com).
+Please report security vulnerabilities through the [GitHub Security tab](https://github.com/1121citrus/mokerlink-backup/security).
+Do not open a public GitHub issue for security vulnerabilities.

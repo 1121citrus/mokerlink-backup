@@ -44,7 +44,10 @@ TRIVY_TAG=0.62.1
 GRYPE_IMAGE=anchore/grype
 GRYPE_TAG=v0.87.0
 DIVE_IMAGE=wagoodman/dive
-DIVE_TAG=latest
+DIVE_TAG=v0.13.1
+
+TRIVY_CACHE_VOLUME=mokerlink-backup-staging-trivy-cache
+GRYPE_CACHE_VOLUME=mokerlink-backup-staging-grype-cache
 
 show_help() {
     sed -n '/^# Usage:/,/^set -/p' "$0" \
@@ -515,21 +518,33 @@ run_tests() {
 
     if [[ "${_SCAN}" == "true" ]]; then
         echo "==> Scan: Trivy ${IMAGE}" >&2
+        _trivy_tar=$(mktemp /tmp/trivy-scan-XXXXXX.tar)
+        trap 'rm -f "${_trivy_tar}"' EXIT
+        docker image save "${IMAGE}" -o "${_trivy_tar}"
         docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            -v "${_trivy_tar}:/scan.tar:ro" \
+            -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
             "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
                 --exit-code 1 \
                 --ignore-unfixed \
                 --severity HIGH,CRITICAL \
-                "${IMAGE}"
+                --input /scan.tar
+        rm -f "${_trivy_tar}"
+        trap - EXIT
     fi
 
     if [[ "${_ADVISE_GRYPE}" == "true" ]]; then
         echo "==> Advise: Grype ${IMAGE}" >&2
+        _grype_tar=$(mktemp /tmp/grype-scan-XXXXXX.tar)
+        trap 'rm -f "${_grype_tar}"' EXIT
+        docker image save "${IMAGE}" -o "${_grype_tar}"
         docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            -v "${_grype_tar}:/scan.tar:ro" \
+            -v "${GRYPE_CACHE_VOLUME}:/root/.cache/grype" \
             "${GRYPE_IMAGE}:${GRYPE_TAG}" \
-            "${IMAGE}" || true
+                docker-archive:/scan.tar || true
+        rm -f "${_grype_tar}"
+        trap - EXIT
     fi
 
     if [[ "${_ADVISE_SCOUT}" == "true" ]]; then
@@ -539,11 +554,17 @@ run_tests() {
 
     if [[ "${_ADVISE_DIVE}" == "true" ]]; then
         echo "==> Advise: Dive ${IMAGE}" >&2
+        _dive_tar=$(mktemp /tmp/dive-scan-XXXXXX.tar)
+        trap 'rm -f "${_dive_tar}"' EXIT
+        docker save "${IMAGE}" > "${_dive_tar}"
         docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            -v "${_dive_tar}:/scan.tar:ro" \
             "${DIVE_IMAGE}:${DIVE_TAG}" \
-            --ci \
-            "${IMAGE}" || true
+                --source docker-archive \
+                --ci \
+                /scan.tar || true
+        rm -f "${_dive_tar}"
+        trap - EXIT
     fi
 
     echo "=============================================="
