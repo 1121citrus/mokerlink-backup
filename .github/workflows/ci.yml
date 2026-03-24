@@ -102,7 +102,7 @@ jobs:
         run: gunzip -c /tmp/image.tar.gz | docker load
 
       - name: Run test suite
-        run: chmod +x test/run-all test/backup-* test/healthcheck test/bin/* test/mokerlink-backup && ./test/run-all
+        run: ./test/run-all
 
   # ── Stage 4: Security scan ─────────────────────────────────────────────────
   # Scans the built image before pushing.  Fails the job (and blocks push) if
@@ -150,10 +150,13 @@ jobs:
         id: tags
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "tags=${IMAGE}:${GITHUB_REF_NAME#v},${IMAGE}:latest" >> "$GITHUB_OUTPUT"
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "tags=${IMAGE}:${VERSION},${IMAGE}:latest" >> "$GITHUB_OUTPUT"
           else
-            echo "tags=${IMAGE}:staging-$(date -u +%Y.%m.%d.%H%M%S),${IMAGE}:staging" >> "$GITHUB_OUTPUT"
+            VERSION="staging-$(date -u +%Y.%m.%d.%H%M%S)"
+            echo "tags=${IMAGE}:${VERSION},${IMAGE}:staging" >> "$GITHUB_OUTPUT"
           fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU (multi-platform cross-compilation)
         uses: docker/setup-qemu-action@v3
@@ -176,4 +179,4 @@ jobs:
           sbom: true
           provenance: mode=max
           tags: ${{ steps.tags.outputs.tags }}
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ steps.tags.outputs.version }}
