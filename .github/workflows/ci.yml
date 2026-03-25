@@ -130,6 +130,13 @@ jobs:
       - name: Load image
         run: gunzip -c /tmp/image.tar.gz | docker load
 
+      - name: Cache Trivy vulnerability DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: trivy-db-${{ runner.os }}-
+
       - name: Trivy vulnerability scan
         uses: aquasecurity/trivy-action@0.35.0
         with:
@@ -138,6 +145,9 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: '1'
           ignore-unfixed: true
+        env:
+          TRIVY_NO_PROGRESS: "true"
+          TRIVY_QUIET: "true"
 
   # ── Stage 5: Push to Docker Hub ────────────────────────────────────────────
   # Runs only on version tags and the staging branch; never on plain main pushes.

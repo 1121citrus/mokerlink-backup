@@ -80,6 +80,10 @@ Runs in parallel with the test job. Scans the local image **before** it is pushe
 - **Severity:** CRITICAL, HIGH
 - **Blocking:** `exit-code: 1` — fails and blocks push if fixable CVEs found
 - **Noise reduction:** `ignore-unfixed: true` — suppresses CVEs with no available patch
+- **DB caching:** `~/.cache/trivy` is cached between runs with `actions/cache`; the
+  vulnerability DB is only re-downloaded when the cache is cold or the DB has been updated
+- **Download noise:** `TRIVY_NO_PROGRESS=true` suppresses progress bars; `TRIVY_QUIET=true`
+  suppresses `INFO [vulndb]` log lines during DB download
 
 ---
 
