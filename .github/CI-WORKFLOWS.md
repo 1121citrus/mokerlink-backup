@@ -22,6 +22,12 @@ Single unified workflow for all CI/CD stages.
 - **Push:** `main`, `staging` branches and `v*` version tags
 - **Pull requests:** To `main` branch
 
+### Concurrency
+
+- **Group:** `<workflow-name>-<ref>` — one concurrent run per workflow + branch/tag
+- **Branches and PRs:** Cancel any in-progress run when a newer one starts
+- **Version tags:** Never cancelled — release builds always complete
+
 ### Versioning
 
 Tag-driven. Push a git tag to publish a release:
