@@ -4,13 +4,14 @@ Automated linting, building, testing, security scanning, and Docker image public
 
 ## Workflow Overview
 
-| Stage        | Trigger                                    | Purpose                                          |
-| ------------ | ------------------------------------------ | ------------------------------------------------ |
-| **Lint**     | All pushes to main/staging, PRs, tags      | Validate Dockerfile and shell scripts            |
-| **Build**    | After lint                                 | Build image and share as artifact                |
-| **Test**     | After build (parallel with scan)           | Run full test suite against built image          |
-| **Scan**     | After build (parallel with test)           | Trivy image scan — blocks push on fixable CVEs   |
-| **Push**     | Version tags and staging branch only       | Multi-platform build and push to Docker Hub      |
+| Stage          | Trigger                                    | Purpose                                          |
+| -------------- | ------------------------------------------ | ------------------------------------------------ |
+| **Lint**       | All pushes to main/staging, PRs, tags      | Validate Dockerfile and shell scripts            |
+| **Build**      | After lint                                 | Build image and share as artifact                |
+| **Test**       | After build (parallel with scan)           | Run full test suite against built image          |
+| **Scan**       | After build (parallel with test)           | Trivy image scan — blocks push on fixable CVEs   |
+| **Push**       | Version tags and staging branch only       | Multi-platform build and push to Docker Hub      |
+| **Dependabot** | Weekly (Monday 06:00 UTC)                  | Keep GitHub Actions versions current             |
 
 ## CI Workflow (`ci.yml`)
 
@@ -38,7 +39,10 @@ No automation bumps the version — the tag is always a deliberate decision.
 ## Stage 1: Lint
 
 - **Hadolint** — Dockerfile best-practice checks
-- **ShellCheck** — static analysis of `src/` and `test/` shell scripts
+- **ShellCheck** — static analysis of all executable shell scripts:
+  - `build`
+  - `src/common-functions`, `src/bin/backup`, `src/bin/get-backup-config`, `src/bin/get-config`, `src/bin/get-running-config`, `src/bin/get-startup-config`, `src/bin/healthcheck`, `src/bin/mokerlink-backup`, `src/bin/startup`
+  - `test/run-all`, `test/backup-required-vars`, `test/backup-success`, `test/backup-encryption`, `test/build-options`, `test/healthcheck`, `test/mokerlink-backup`, `test/staging`, `test/bin/*`
 
 ---
 
@@ -130,6 +134,19 @@ On push to main/staging or PR to main
 - `test/run-all` — Test runner
 - `test/mokerlink-backup`, `test/backup-*`, `test/healthcheck` — Individual test scripts
 - `test/bin/` — Mock binaries used by tests
+
+## Automated dependency updates
+
+`dependabot.yml` configures weekly automated PRs to keep GitHub Actions current.
+
+- **Schedule:** Every Monday at 06:00 UTC
+- **Scope:** GitHub Actions (`package-ecosystem: github-actions`) — updates action pins in
+  `.github/workflows/*.yml`
+- **Labels:** `dependencies`, `github-actions`
+- **Security benefit:** Dependabot also proposes SHA-pinned digests (recommended for SLSA /
+  OpenSSF Scorecard hardening)
+
+---
 
 ## Local Workflow Parity
 

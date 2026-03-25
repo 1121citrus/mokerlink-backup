@@ -1,0 +1,25 @@
+# Dependabot configuration.
+#
+# Dependabot opens automated PRs to keep dependencies current.
+# Each update group is checked weekly on Monday mornings (UTC).
+#
+# References:
+#   https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+
+updates:
+  # ── GitHub Actions ──────────────────────────────────────────────────────────
+  # Keeps action versions in .github/workflows/*.yml up to date.
+  # Dependabot will also propose SHA-pinned updates, which is the recommended
+  # hardening step for supply-chain security (SLSA / OpenSSF Scorecards).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "github-actions"
