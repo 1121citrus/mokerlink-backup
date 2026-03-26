@@ -11,7 +11,8 @@ Automated linting, building, testing, security scanning, and Docker image public
 | **Test**       | After build (parallel with scan)           | Run full test suite against built image          |
 | **Scan**       | After build (parallel with test)           | Trivy image scan — blocks push on fixable CVEs   |
 | **Push**       | Version tags and staging branch only       | Multi-platform build and push to Docker Hub      |
-| **Dependabot** | Weekly (Monday 06:00 UTC)                  | Keep GitHub Actions versions current             |
+| **Dependabot**     | Weekly (Monday 06:00 UTC)                  | Keep GitHub Actions versions current             |
+| **Release Please** | Push to main/master                        | Open release PR; create tag and GitHub Release   |
 
 ## CI Workflow (`ci.yml`)
 
@@ -172,3 +173,32 @@ On push to main/staging or PR to main
 
 - `./build` supports `--advice` (alias for `--advise`) and `--cache` for one-run scanner cache controls.
 - `test/staging` supports `--scan`, `--no-scan`, `--advise`, and `--no-advise` for live-image validation.
+
+---
+
+## Automated releases (release-please)
+
+`release-please.yml` watches for [conventional commits](https://www.conventionalcommits.org/)
+merged to `main`/`master` and automates the release lifecycle:
+
+1. Opens a "release PR" that bumps `version.txt`, prepends to `CHANGELOG.md`, and proposes the next semver tag
+2. When the release PR is merged, creates a GitHub Release and pushes the version tag
+3. The existing CI `push` job fires on the new tag and builds and publishes the Docker image
+
+### Conventional commit types that trigger version bumps
+
+| Commit prefix | Bump |
+|---|---|
+| `fix:` | patch (1.0.x) |
+| `feat:` | minor (1.x.0) |
+| `feat!:` or `BREAKING CHANGE:` | major (x.0.0) |
+
+All other prefixes (`ci:`, `docs:`, `chore:`, `refactor:`, `test:`, etc.) appear in the
+changelog but do not trigger a version bump on their own.
+
+### Configuration
+
+- `release-please-config.json` — release type (`simple`) and package root
+- `.release-please-manifest.json` — current version (updated by release-please on each release)
+- `version.txt` — plain-text version file (updated by release-please; can be referenced in Dockerfile)
+- `CHANGELOG.md` — generated/updated by release-please
