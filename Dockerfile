@@ -22,6 +22,20 @@ ARG ALPINE_TAG=3.22
 FROM alpine:${ALPINE_TAG}
 
 ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+
+# OCI image annotations (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
+LABEL org.opencontainers.image.title="mokerlink-backup" \
+      org.opencontainers.image.description="Download configuration backups from a Mokerlink managed network switch" \
+      org.opencontainers.image.url="https://github.com/1121citrus/mokerlink-backup" \
+      org.opencontainers.image.source="https://github.com/1121citrus/mokerlink-backup" \
+      org.opencontainers.image.vendor="1121 Citrus Avenue" \
+      org.opencontainers.image.authors="James Hanlon <jim@hanlonsoftware.com>" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
 
 # install required utilities and configure environment
 # hadolint ignore=DL3018,SC2261,SC3041,DL3059

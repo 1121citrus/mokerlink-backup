@@ -162,6 +162,12 @@ jobs:
             type=sha,prefix=staging-,format=short,enable=${{ github.ref == 'refs/heads/staging' }}
             type=raw,value=staging,enable=${{ github.ref == 'refs/heads/staging' }}
 
+      - name: Build metadata extras
+        id: extras
+        run: |
+          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y%m%dT%H%M%S)" >> "$GITHUB_OUTPUT"
+
       - name: Set up QEMU (multi-platform cross-compilation)
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
@@ -184,6 +190,9 @@ jobs:
           provenance: mode=max
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ steps.meta.outputs.version }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            GIT_COMMIT=${{ steps.extras.outputs.commit }}
+            BUILD_DATE=${{ steps.extras.outputs.date }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
