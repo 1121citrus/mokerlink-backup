@@ -27,7 +27,9 @@ setup() {
 }
 
 teardown() {
-    [ -n "${TEST_TMPDIR:-}" ] && rm -rf "${TEST_TMPDIR}"
+    if [ -n "${TEST_TMPDIR:-}" ]; then
+        rm -rf "${TEST_TMPDIR}"
+    fi
 }
 
 @test "no-compression backup begins and finishes" {

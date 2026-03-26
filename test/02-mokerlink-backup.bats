@@ -41,35 +41,56 @@ setup() {
 }
 
 teardown() {
-    [ -n "${TEST_TMPDIR:-}" ] && rm -rf "${TEST_TMPDIR}"
+    if [ -n "${TEST_TMPDIR:-}" ]; then
+        rm -rf "${TEST_TMPDIR}"
+    fi
 }
 
 # ── Required-variable validation ─────────────────────────────────────────────
 
 @test "exits non-zero when neither MOKERLINK_HOST nor TAILSCALE_HOST is set" {
-    run run_mokerlink_backup -e MOKERLINK_HOST= -e TAILSCALE_HOST=
+    run docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+        -e "PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+        -e MOKERLINK_HOST= \
+        -e TAILSCALE_HOST= \
+        -e MOKERLINK_PASSWORD=testpass \
+        -v "${WHEREAMI}/bin:/test/bin:ro" \
+        -v "${WHEREAMI}/bin/get-config:/usr/local/bin/get-config:ro" \
+        "${IMAGE}" /usr/local/bin/mokerlink-backup
     [ "$status" -ne 0 ]
 }
 
 @test "TAILSCALE_HOST accepted as fallback when MOKERLINK_HOST is unset" {
-    run run_mokerlink_backup -e MOKERLINK_HOST= -e TAILSCALE_HOST=tailscale-host
+    run docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+        -e "PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+        -e MOKERLINK_HOST= \
+        -e TAILSCALE_HOST=tailscale-host \
+        -e MOKERLINK_PASSWORD=testpass \
+        -v "${WHEREAMI}/bin:/test/bin:ro" \
+        -v "${WHEREAMI}/bin/get-config:/usr/local/bin/get-config:ro" \
+        "${IMAGE}" /usr/local/bin/mokerlink-backup
     [ "$status" -eq 0 ]
 }
 
 @test "exits non-zero when no password is available" {
-    run run_mokerlink_backup \
+    run docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+        -e "PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+        -e MOKERLINK_HOST=fake-host \
         -e MOKERLINK_PASSWORD= \
-        -e MOKERLINK_PASSWORD_FILE=/nonexistent
+        -e MOKERLINK_PASSWORD_FILE=/nonexistent \
+        -v "${WHEREAMI}/bin:/test/bin:ro" \
+        -v "${WHEREAMI}/bin/get-config:/usr/local/bin/get-config:ro" \
+        "${IMAGE}" /usr/local/bin/mokerlink-backup
     [ "$status" -ne 0 ]
 }
 
 # ── XML output ────────────────────────────────────────────────────────────────
 
 @test "stdout is a valid tar archive" {
-    local archive
-    archive=$(run_mokerlink_backup)
+    TEST_TMPDIR=$(mktemp -d)
+    run_mokerlink_backup > "${TEST_TMPDIR}/out.tar"
     echo "checking tar validity"
-    echo "${archive}" | tar -t > /dev/null
+    tar -tf "${TEST_TMPDIR}/out.tar" > /dev/null
 }
 
 @test "name file is written with expected filename" {
