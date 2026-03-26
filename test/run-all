@@ -9,11 +9,10 @@ set -euo pipefail
 
 whereami=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 
-status=0
-"${whereami}/build-options"         || status=1
-"${whereami}/mokerlink-backup"      || status=1
-"${whereami}/backup-required-vars"  || status=1
-"${whereami}/backup-success"        || status=1
-"${whereami}/backup-encryption"     || status=1
-"${whereami}/healthcheck"           || status=1
-exit $status
+bats \
+    "${whereami}/01-build.bats" \
+    "${whereami}/02-mokerlink-backup.bats" \
+    "${whereami}/03-backup-required-vars.bats" \
+    "${whereami}/04-backup-success.bats" \
+    "${whereami}/05-backup-encryption.bats" \
+    "${whereami}/06-healthcheck.bats"

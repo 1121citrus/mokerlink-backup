@@ -1,0 +1,3979 @@
+diff --git a/.dive-ci b/.dive-ci
+deleted file mode 100644
+index 5d6dafa..0000000
+--- a/.dive-ci
++++ /dev/null
+@@ -1,14 +0,0 @@
+-rules:
+-  # Efficiency below this percentage fails the check.
+-  lowestEfficiency: 0.9
+-
+-  # Absolute wasted bytes above this threshold fails the check.
+-  # Disabled: `apk upgrade` on Alpine unavoidably overwrites base-image files
+-  # (old versions remain in the base layer), which Dive counts as wasted space.
+-  highestWastedBytes: disabled
+-
+-  # Percentage of wasted user-layer space above this threshold fails the check.
+-  # Default is 0.1 (10%).  Relaxed to 0.20: `apk upgrade` replaces Alpine base
+-  # files, registering as layer waste.  20% provides a buffer for that while
+-  # still catching genuinely bloated images.
+-  highestUserWastedPercent: 0.20
+diff --git a/.github/CI-WORKFLOWS.md b/.github/CI-WORKFLOWS.md
+index bb742a8..522db19 100644
+--- a/.github/CI-WORKFLOWS.md
++++ b/.github/CI-WORKFLOWS.md
+@@ -54,7 +54,6 @@ Artifact retention: 1 day (sufficient for the duration of the workflow).
+ 
+ Runs in parallel with the scan job. Downloads the artifact, loads the image, and executes the full test suite via `test/run-all`:
+ 
+-- `mokerlink-backup` — validates CLI option parsing, config selection flags, and output formats
+ - `backup-required-vars` — validates required environment variables
+ - `backup-success` — verifies successful backup operation
+ - `backup-encryption` — tests backup encryption
+@@ -96,7 +95,7 @@ Runs only when test and scan both pass, and only on version tags or the staging
+ 
+ ## Execution Flow
+ 
+-```text
++```
+ On push to main/staging or PR to main
+     ↓
+ [Lint] — hadolint + shellcheck
+@@ -128,10 +127,5 @@ On push to main/staging or PR to main
+ - `Dockerfile` — Container build definition
+ - `src/` — Application shell scripts
+ - `test/run-all` — Test runner
+-- `test/mokerlink-backup`, `test/backup-*`, `test/healthcheck` — Individual test scripts
++- `test/backup-*`, `test/healthcheck` — Individual test scripts
+ - `test/bin/` — Mock binaries used by tests
+-
+-## Local Workflow Parity
+-
+-- `./build` supports `--advice` (alias for `--advise`) and `--cache` for one-run scanner cache controls.
+-- `test/staging` supports `--scan`, `--no-scan`, `--advise`, and `--no-advise` for live-image validation.
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index c7b23ca..6c8a035 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -44,14 +44,6 @@ jobs:
+             test/healthcheck \
+             test/bin/*
+ 
+-      - name: Lint markdown with markdownlint-cli
+-        run: |
+-          docker run --rm \
+-            -v "$PWD:/workdir:ro" \
+-            -w /workdir \
+-            ghcr.io/igorshubovych/markdownlint-cli:v0.48.0 \
+-            "**/*.md"
+-
+   # ── Stage 2: Build ─────────────────────────────────────────────────────────
+   # Build image once, share as artifact so test and scan work on the same image.
+   build:
+@@ -102,7 +94,7 @@ jobs:
+         run: gunzip -c /tmp/image.tar.gz | docker load
+ 
+       - name: Run test suite
+-        run: chmod +x test/run-all test/backup-* test/healthcheck test/bin/* test/mokerlink-backup && ./test/run-all
++        run: chmod +x test/run-all test/backup-* test/healthcheck test/bin/* && ./test/run-all
+ 
+   # ── Stage 4: Security scan ─────────────────────────────────────────────────
+   # Scans the built image before pushing.  Fails the job (and blocks push) if
+@@ -176,4 +168,3 @@ jobs:
+           sbom: true
+           provenance: mode=max
+           tags: ${{ steps.tags.outputs.tags }}
+-          build-args: VERSION=${{ github.ref_name }}
+diff --git a/.markdownlint.json b/.markdownlint.json
+deleted file mode 100644
+index 13884db..0000000
+--- a/.markdownlint.json
++++ /dev/null
+@@ -1,15 +0,0 @@
+-{
+-  "default": true,
+-  "MD013": false,
+-  "MD014": false,
+-  "MD024": false,
+-  "MD004": false,
+-  "MD022": false,
+-  "MD031": false,
+-  "MD032": false,
+-  "MD034": false,
+-  "MD040": false,
+-  "MD047": false,
+-  "MD051": false,
+-  "MD060": false
+-}
+diff --git a/.markdownlintignore b/.markdownlintignore
+deleted file mode 100644
+index 0e4b780..0000000
+--- a/.markdownlintignore
++++ /dev/null
+@@ -1 +0,0 @@
+-LICENSE.md
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+deleted file mode 100644
+index 240626e..0000000
+--- a/CHANGELOG.md
++++ /dev/null
+@@ -1,50 +0,0 @@
+-# Changelog
+-
+-All notable changes to this project will be documented in this file.
+-
+-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+-
+-## [Unreleased]
+-
+-### Changed
+-- Developer features added to build and staging test scripts
+-
+-## [0.0.3] - 2026-03-22
+-
+-### Added
+-- Docker Scout CVE advisement to build tool (`--advise scout`)
+-- Dive image layer analysis to build tool (`--advise dive`; opt-in)
+-
+-## [0.0.2] - 2026-03-22
+-
+-### Fixed
+-- Code, documentation, and test coverage review findings
+-
+-## [0.0.1] - 2026-03-19
+-
+-### Added
+-- Initial release of mokerlink-backup
+-- Support for backing up Mikrotik RouterOS configurations to S3
+-- Scheduled backups via cron
+-- Optional GPG encryption of backup archives
+-- Optional compression (gzip, bzip3, xz, zstd)
+-- Dry-run mode enabled by default for safety
+-- DRYRUN=false required for live backup operations
+-- Health-check endpoint to verify cron job execution
+-- SLSA Level 3 provenance attestations
+-- SBOM (Software Bill of Materials) generation
+-
+-### Security
+-- Non-root execution (UID 10001)
+-- Minimal Alpine base image
+-- Docker secret support for credentials
+-- Expect buffer increased to 1MB for large configurations
+-- GPG encryption via passphrase or file
+-
+----
+-
+-[Unreleased]: https://github.com/1121citrus/mokerlink-backup/compare/v0.0.3...HEAD
+-[0.0.3]: https://github.com/1121citrus/mokerlink-backup/compare/v0.0.2...v0.0.3
+-[0.0.2]: https://github.com/1121citrus/mokerlink-backup/compare/v0.0.1...v0.0.2
+-[0.0.1]: https://github.com/1121citrus/mokerlink-backup/releases/tag/v0.0.1
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+deleted file mode 100644
+index 6228bb9..0000000
+--- a/CONTRIBUTING.md
++++ /dev/null
+@@ -1,62 +0,0 @@
+-# Contributing
+-
+-## Prerequisites
+-
+-- Docker with buildx support
+-- Bash 4.0+
+-- Mikrotik RouterOS device for integration testing (optional)
+-
+-## Development Workflow
+-
+-### Building
+-
+-The `build` script runs all stages: lint → build → test → scan → push.
+-
+-```bash
+-./build              # Local build and test
+-./build --push       # Push to Docker Hub
+-./build --help       # See all options
+-```
+-
+-### Testing
+-
+-Run the test suite against a locally built image:
+-
+-```bash
+-./build --no-scan
+-```
+-
+-Or manually:
+-
+-```bash
+-docker buildx build -t mokerlink-backup:test .
+-bash test/run-all TAG=test
+-```
+-
+-### Code Style
+-
+-All shell scripts must pass:
+-
+-```bash
+-shellcheck src/**/*.sh test/*.sh
+-hadolint Dockerfile
+-```
+-
+-The `./build` stage runs these automatically.
+-
+-### Submitting Changes
+-
+-1. Create a branch from `dev`
+-2. Make your changes
+-3. Run `./build` to lint, test, and scan
+-4. Submit a pull request to the `dev` branch
+-
+-## Release Process
+-
+-Releases are tagged with semantic versions:
+-
+-```bash
+-./build --push --version 1.2.3
+-```
+-
+-Tags trigger a multi-platform build and push to Docker Hub, plus SLSA provenance and SBOM generation.
+diff --git a/Dockerfile b/Dockerfile
+index c7c40f7..837c3af 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -18,41 +18,34 @@
+ # You should have received a copy of the GNU Affero General Public License
+ # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ 
+-ARG ALPINE_TAG=3.22
++ARG ALPINE_TAG=3.21
+ FROM alpine:${ALPINE_TAG}
+ 
+-ARG VERSION=dev
+-
+ # install required utilities and configure environment
+-# hadolint ignore=DL3018,SC2261,SC3041,DL3059
+ RUN set -Eeux; \
+     apk update && \
+     apk upgrade --no-cache --no-interactive && \
+     apk add --no-cache --no-interactive --upgrade \
+-        'aws-cli>2.20' \
+-        'bash>5.2' \
+-        'bzip2>1.0' \
+-        'bzip3>1.3' \
+-        'expect>5.45' \
+-        'gnupg>2.4' \
+-        'gzip>1.12' \
+-        'lzop>1.04' \
+-        'openssh>9.8' \
+-        'openssl>3.3' \
+-        'pigz>2.8' \
+-        'pixz>1.0' \
+-        'py3-cryptography>44.0' \
+-        'py3-urllib3>1.25' \
+-        'xz>5.6' \
+-        'zip>3.0' \
++        aws-cli>2.27 \
++        bash>5.2 \
++        bzip2>1.0 \
++        bzip3>1.5 \
++        expect>5.45 \
++        gnupg>2.4 \
++        gzip>1.14 \
++        lzop>1.04 \
++        openssh>10.0 \
++        openssl>3.3 \
++        pigz>2.8 \
++        pixz>1.0 \
++        xz>5.6 \
++        zip>3.0 \
+         && \
+-    install -d -m 700 /root/.gnupg /root/.ssh && \
++    mkdir -pv -m 700 /root/.gnupg /root/.ssh && \
+     touch /root/.gnupg/pubring.kbx && \
+     chmod 600 /root/.gnupg/pubring.kbx && \
+     mkdir -pv /usr/local/include/bash && \
+     ln -sf /usr/local/bin/common-functions /usr/local/include/bash/common-functions && \
+-    mkdir -p /usr/local/share/mokerlink-backup && \
+-    printf '%s\n' "${VERSION}" > /usr/local/share/mokerlink-backup/version && \
+     true
+ 
+ COPY --chmod=755 ./src/bin/* /usr/local/bin
+diff --git a/README.md b/README.md
+index d60e35e..17cb026 100644
+--- a/README.md
++++ b/README.md
+@@ -1,142 +1,37 @@
+ # 1121citrus/mokerlink-backup
+ 
+-A CLI tool to download configuration backups from a [Mokerlink managed network switch](https://www.mokerlink.com/index.php?route=product/product&product_id=396).
++An application specific service to create [Mokerlink managed network switch](https://www.mokerlink.com/index.php?route=product/product&product_id=396) backups and copy them to S3.
+ 
+ ## Contents
+ 
+ - [Contents](#contents)
+ - [Synopsis](#synopsis)
+-- [CLI Usage](#cli-usage)
+-- [Examples](#examples)
+-  - [Download all configurations as a tarball](#download-all-configurations-as-a-tarball)
+-  - [Print the running configuration to stdout](#print-the-running-configuration-to-stdout)
+-  - [Selective download](#selective-download)
+-- [Legacy Service Mode](#legacy-service-mode)
+-  - [Run as a periodic cron job](#run-as-a-periodic-cron-job)
+-  - [Run a one-off backup to S3](#run-a-one-off-backup-to-s3)
+-  - [Docker Compose example](#docker-compose-example)
+-  - [Verify a backup](#verify-a-backup)
++- [Overview](#overview)
++- [Example: backup periodically as cron job](#example-backup-periodically-as-cron-job)
++  - [Example Log Output](#example-log-output)
++- [Example: Run "One Off" Backup](#example-run-one-off-backup)
++- [Example: Fetch running, startup or backup configurations](#example-fetch-running-startup-or-backup-configurations)
++- [Example: Docker compose file](#example-docker-compose-file)
+ - [Configuration](#configuration)
+-  - [CLI parameters](#cli-parameters)
+-  - [Legacy service parameters](#legacy-service-parameters)
+ - [Building](#building)
+ - [Security](#security)
+ 
+ ## Synopsis
+ 
+-`mokerlink-backup` downloads the running, startup, and/or backup configurations
+-from a [Mokerlink managed network switch](https://www.mokerlink.com/index.php?route=product/product&product_id=396)
+-and streams them to stdout as a tar archive or raw text.  The script uses the
+-[Cisco-inspired CLI](https://www.mokerlink.com/index.php?route=product/product/download&download_id=20)
+-over SSH.
+-
+-A backup user must be provisioned on the switch with `Admin` privileges.
+-Firewall rules must allow the container to reach the switch's SSH port (22/tcp).
+-
+-## CLI Usage
+-
+-```text
+-mokerlink-backup [options]
+-
+-Download a backup of a Mokerlink managed network switch.
+-
+-Options:
+-  -?,--help              Display this help text
+-  -v,--version           Display command version
+-  -a,--all               Include all configurations (default)
+-  -r,--running           Include running configuration
+-     --no-running        Exclude running configuration
+-  -s,--startup           Include startup configuration
+-     --no-startup        Exclude startup configuration
+-  -b,--backup            Include backup configuration
+-     --no-backup         Exclude backup configuration
+-  -f,--format FMT        Output format: 'raw' or 'tar'
+-                         (env: MOKERLINK_FORMAT; default: 'tar')
+-  -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST)
+-  -u,--user USER         SSH username (env: MOKERLINK_USER;
+-                         default: remote-backup)
+-  -p,--password PW       Password (env: MOKERLINK_PASSWORD)
+-  -P,--password-file FILE
+-                         Password file (env: MOKERLINK_PASSWORD_FILE;
+-                         default: /run/secrets/mokerlink-password)
+-```
+-
+-Connection parameters may also be supplied via environment variables (see
+-[CLI parameters](#cli-parameters) below).
+-
+-> **Note on `-h`:** There is no `-h` flag — `-H` (uppercase) is the host option.
+-> Use `-?` or `--help` to display help text.
++- Periodically backup the [Mokerlink managed network switch](https://www.mokerlink.com/index.php?route=product/product&product_id=396) to off site storage (S3).
++- Backup files are renamed so they sort by date.
++- Credentials are supplied by a compose
++[secret](https://docs.docker.com/compose/how-tos/use-secrets/).
+ 
+-## Examples
++## Overview
+ 
+-### Download all configurations as a tarball
+-
+-```console
+-$ docker run --rm \
+-      -v ./secrets/mokerlink-password:/run/secrets/mokerlink-password:ro \
+-      1121citrus/mokerlink-backup:latest \
+-      mokerlink-backup --host switch --user backup-user > switch-backup.tar
+-```
++This service will periodically fetch a [Mokerlink managed network switch](https://www.mokerlink.com/index.php?route=product/product&product_id=396) configuration and transfer it to AWS. The script utilizes the [Cisco inspired CLI](https://www.mokerlink.com/index.php?route=product/product/download&download_id=20).
+ 
+-Or using environment variables:
++You must separately provision and deploy a user on the Mokerlink managed network switch that will be used to copy perform the backups. The user must be granted `Admin` privileges.
+ 
+-```console
+-$ docker run --rm \
+-      -e MOKERLINK_HOST=switch \
+-      -e MOKERLINK_USER=backup-user \
+-      -v ./secrets/mokerlink-password:/run/secrets/mokerlink-password:ro \
+-      1121citrus/mokerlink-backup:latest \
+-      mokerlink-backup > switch-backup.tar
+-```
++Ensure that firewall rules allow the container to reach the switch's SSH port (22/tcp).
+ 
+-### Print the running configuration to stdout
+-
+-```console
+-$ docker run --rm \
+-      -v ./secrets/mokerlink-password:/run/secrets/mokerlink-password:ro \
+-      1121citrus/mokerlink-backup:latest \
+-      mokerlink-backup --host switch --user backup-user --running --format raw
+-SYSTEM CONFIG FILE ::= BEGIN
+-! System Description: KT-NOS POE-G244GSM Switch
+-! System Version: v1.0.0.27
+-! System Name: switch
+-! System Up Time: 0 days, 23 hours, 9 mins, 34 secs
+-!
+-    .
+-    .
+-    .
+-```
+-
+-### Selective download
+-
+-Include only running and startup configs (exclude backup):
+-
+-```console
+-mokerlink-backup --host switch -u backup-user -P pw-file --running --startup > partial.tar
+-```
+-
+-Include all except startup:
+-
+-```console
+-mokerlink-backup --host switch -u backup-user -P pw-file --no-startup > partial.tar
+-```
+-
+----
+-
+-## Legacy Service Mode
+-
+-The image can also run as a Docker Compose service to periodically perform
+-backups and transfer them to S3.  This behavior is retained for backward
+-compatibility.
+-
+-> A future refactoring will replace the cron service role with a dedicated
+-> scheduler (e.g. [willfarrell/docker-crontab](https://github.com/willfarrell/docker-crontab)
+-> or [mcuadros/ofelia](https://github.com/mcuadros/ofelia)) that invokes
+-> `mokerlink-backup` directly.  Once that is done the legacy `backup`,
+-> `startup`, and `healthcheck` scripts — and the S3/GPG dependencies — can
+-> be removed, greatly reducing the attack surface.
+-
+-### Run as a periodic cron job
++## Example: backup periodically as cron job
+ 
+ ```console
+ $ docker run -i --rm \
+@@ -152,7 +47,7 @@ $ docker run -i --rm \
+       1121citrus/mokerlink-backup:latest
+ ```
+ 
+-Example log output:
++### Example Log Output
+ 
+ ```console
+ [INFO] 20250922T120714 startup create env file /root/.env
+@@ -161,7 +56,7 @@ Example log output:
+ [INFO] 20250922T120714 startup export AWS_S3_BUCKET_NAME='backups-bucket'
+ [INFO] 20250922T120714 startup export COMPRESSION='bzip2'
+ [INFO] 20250922T120714 startup export CRON_EXPRESSION='*/15 * * * *'
+-[INFO] 20250922T120714 startup export DEBUG='false'
++[INFO] 20250922T120714 startup export DEBUG='true'
+ [INFO] 20250922T120714 startup export GPG_CIPHER_ALGO='aes256'
+ [INFO] 20250922T120714 startup export GPG_PASSPHRASE='**REDACTED**'
+ [INFO] 20250922T120714 startup export GPG_PASSPHRASE_FILE='/run/secrets/gpg-passphrase'
+@@ -171,13 +66,9 @@ Example log output:
+ [INFO] 20250922T120714 startup export MOKERLINK_USER='remote-backup'
+ [INFO] 20250922T120714 startup export TAILSCALE_HOST=''
+ [INFO] 20250922T120714 startup export TZ='UTC'
+-[INFO] 20250922T120714 startup installing cron.d entry: /usr/local/bin/backup
+-[INFO] 20250922T120714 startup mkdir: created directory '/var/spool/cron'
+-[INFO] 20250922T120714 startup mkdir: created directory '/var/spool/cron/crontabs'
+-[INFO] 20250922T120714 startup mode of '/var/spool/cron/crontabs' changed from 0700 to 0755
+-[INFO] 20250922T120714 startup mode of '/var/spool/cron/crontabs/root' changed from 0644 to 0600
+-[INFO] 20250922T120714 startup crontab: */15 * * * * /usr/local/bin/backup 2>&1
+-[INFO] 20250922T120714 startup handing the reins over to cron daemon
++[INFO] 20250922T160714 startup installing cron.d entry: /usr/local/bin/backup
++[INFO] 20250922T160714 startup crontab: */15 * * * * /usr/local/bin/backup 2>&1
++[INFO] 20250922T160714 startup handing the reins over to cron daemon
+    .
+    .
+    .
+@@ -191,10 +82,31 @@ Example log output:
+ [INFO] 20250922T161523 backup compressing backup with bzip2: 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2
+ [INFO] 20250922T161523 backup encrypting backup with 'gpg' (GnuPG)
+ [INFO] 20250922T161523 backup downloaded '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar' to '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg'
++[INFO] 20250922T161523 backup begin mv '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg' to S3 bucket 'backups-bucket'
++[INFO] 20250922T161523 backup running aws s3 mv --no-progress '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg' '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1' s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg
++[INFO] 20250922T161524 backup move: ./20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg to s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg
++[INFO] 20250922T161524 backup move: ./20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 to s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
++[INFO] 20250922T161524 backup completed aws s3 mv --no-progress 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
+ [INFO] 20250922T161524 backup finish backup
+ ```
+ 
+-### Run a one-off backup to S3
++Verify the backup:
++
++```console
++$ aws s3 cp s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha256 -
++3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4  20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar
++$ aws s3 cp --quiet s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - | gpg --passphrase-file ../1121-citrus/home-assistant/secrets/gpg-passphrase --decrypt --batch --quiet | bunzip2 | sha256sum
++3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4  -
++$ aws s3 cp --quiet s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - | gpg --passphrase-file ../1121-citrus/home-assistant/secrets/gpg-passphrase --decrypt --batch --quiet | bunzip2 | tar -tf -
++./
++./20250922T161500-switch-mokerlink-1.0.0.27-running-config-backup.xml
++./20250922T161500-switch-mokerlink-1.0.0.27-startup-config-backup.xml
++./20250922T161500-switch-mokerlink-1.0.0.27-backup-config-backup.xml
++```
++
++## Example: Run "One Off" Backup
++
++Add the `backup` command to the `docker run` command to create a single backup.
+ 
+ ```console
+ $ docker run -i --rm \
+@@ -207,12 +119,58 @@ $ docker run -i --rm \
+       -v ./secrets/gpg-passphrase:/run/secrets/gpg-passphrase:ro \
+       -v /etc/localtime:/etc/localtime:ro \
+       1121citrus/mokerlink-backup backup
++[INFO] 20250915T013601 backup begin backup
++[INFO] 20250915T013601 backup download 'running' configuration from 'switch'
++[INFO] 20250915T013604 backup completed download of 'running' configuration from 'switch'
++[INFO] 20250915T013604 backup download 'startup' configuration from 'switch'
++[INFO] 20250915T013607 backup completed download of 'startup' configuration from 'switch'
++[INFO] 20250915T013607 backup download 'backup' configuration from 'switch'
++[INFO] 20250915T013610 backup completed download of 'backup' configuration from 'switch'
++[INFO] 20250915T013610 backup compressing backup with gzip --best --no-name --quiet --synchronous: 20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz
++[INFO] 20250915T013610 backup downloaded '20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar' to '20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz'
++[INFO] 20250915T013610 backup begin mv '20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz' to S3 bucket 'backups-bucket'
++[INFO] 20250915T013610 backup running aws s3 mv --no-progress '20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz' '20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.sha1' s3://backups-bucket/20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz
++[INFO] 20250915T013611 backup move: ./20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz to s3://backups-bucket/20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz
++[INFO] 20250915T013611 backup move: ./20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 to s3://backups-bucket/20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
++[INFO] 20250915T013611 backup completed aws s3 mv --no-progress 20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.gz 20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.sha1 s3://backups-bucket/20250915T013601-switch-mokerlink-1.0.0.27-config-backup.tar.sha1
++[INFO] 20250915T013611 backup finish backup
+ ```
+ 
+-### Docker Compose example
++## Example: Fetch running, startup or backup configurations
++
++Use the `get-running-config`, `get-startup-config` and `get-backup-config` commands to the `docker run` command to fetch a configuration file directly.
++
++```console
++$ docker run -i --rm \
++         1121citrus/mokerlink-backup \
++              get-running-config switch remote-backup my-password 
++SYSTEM CONFIG FILE ::= BEGIN
++! System Description: KT-NOS POE-G244GSM Switch
++! System Version: v1.0.0.27
++! System Name: switch
++! System Up Time: 0 days, 23 hours, 9 mins, 34 secs
++!
++!
++!
++system name "switch"
++system location "equipment-rack"
++system contact "admin@switch"
++ip dhcp
++    .
++    .
++    .
++```
++
++The commands take three arguments:
++
++1. `hostname`, defaults to the value of the `MOKERLINK_HOST` or `TAILSCALE_HOST` environment variables, if supplied
++1. `username`, defaults to the value of the `MOKERLINK_USER` environment variable or `remote-backup`
++1. `password`, defaults to the value of the `MOKERLINK_PASSWORD` or `MOKERLINK_PASSWORD_FILE` environment variable
++
++## Example: Docker compose file
+ 
+ ```yml
+-services:
++services: 
+   mokerlink-backup:
+     container_name: mokerlink-backup
+     image: 1121citrus/mokerlink-backup:latest
+@@ -240,51 +198,25 @@ secrets:
+     file: ./secrets/mokerlink-password
+ ```
+ 
+-### Verify a backup
+-
+-```console
+-$ aws s3 cp s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha256 -
+-3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4  20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar
+-$ aws s3 cp --quiet s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - \
+-    | gpg --passphrase-file ./secrets/gpg-passphrase --decrypt --batch --quiet \
+-    | bunzip2 | sha256sum
+-3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4  -
+-```
+-
+----
+-
+ ## Configuration
+ 
+-### CLI parameters
+-
+-Parameter | Option | Environment variable | Default | Notes
+---- | --- | --- | --- | ---
+-Host | `-H`,`--host` | `MOKERLINK_HOST` | `${TAILSCALE_HOST}` | Hostname or IP of the switch. `MOKERLINK_HOST` overrides `TAILSCALE_HOST`.
+-User | `-u`,`--user` | `MOKERLINK_USER` | `remote-backup` | SSH username.
+-Password | `-p`,`--password` | `MOKERLINK_PASSWORD` | _none_ | Switch login password. Prefer `--password-file`.
+-Password file | `-P`,`--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` | File containing the password. Intended as a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/).
+-Format | `-f`,`--format` | `MOKERLINK_FORMAT` | `tar` | Output format: `raw` or `tar`.
+-Tailscale host | — | `TAILSCALE_HOST` | _none_ | Fallback hostname when `MOKERLINK_HOST` is unset.
+-Debug | — | `DEBUG` | `false` | Set to `true` to enable `xtrace`/`verbose`. **WARNING:** exposes passwords in logs.
+-
+-### Legacy service parameters
+-
+-These environment variables are used by the `startup` and `backup` scripts
+-when the image runs as a Docker Compose service.
+-
+ Variable | Default | Notes
+ --- | --- | ---
+-`AWS_CONFIG_FILE` | `/run/secrets/aws-config` | AWS credentials file. Intended as a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/).
++`AWS_CONFIG_FILE` | `/run/secrets/aws-config` | The externally provided AWS configuration file containing credentials, etc. This is intended to be a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/) but could also be a bind mount.
+ `AWS_DRYRUN` | `false` | Set to `true` to pass `--dryrun` to AWS CLI commands.
+-`AWS_S3_BUCKET_NAME` | _required_ | S3 bucket for uploads. May include a path prefix, e.g. `your-bucket/backups/daily` (no trailing `/`).
+-`COMPRESSION` | `none` | Compression algorithm: `bzip`, `bzip2`, `bzip3`, `gz`, `gzip`, `lzma`, `lzo`, `lzop`, `none`, `pigz`, `pixz`, `xz`, `zip`.
+-`CRON_EXPRESSION` | `@daily` | Standard cron expression. See [crontab.guru](https://crontab.guru/).
+-`GPG_CIPHER_ALGO` | `aes256` | GnuPG symmetric encryption cipher.
+-`GPG_PASSPHRASE` | _none_ | GnuPG passphrase. Prefer `GPG_PASSPHRASE_FILE`.
+-`GPG_PASSPHRASE_FILE` | `/run/secrets/gpg-passphrase` | File containing the GnuPG passphrase. Intended as a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/).
+-`TZ` | `UTC` | Timezone for cron scheduling, e.g. `America/New_York`.
+-
+----
++`AWS_S3_BUCKET_NAME` |  | Required parameter. The backup files will be uploaded to this S3 bucket. You may include slashes after the bucket name if you want to upload into a specific path within the bucket, e.g. `your-bucket-name/backups/daily` (without trailing forward slash (`/`)).
++`COMPRESSION` | `none` | Compression application to apply: `bzip`, `bzip2`, `bzip3`, `gz`, `gzip`, `lzma`, `lzo`, `lzop`, `none`, `pigz`, `pixz`, `xz`, `zip`
++`CRON_EXPRESSION` | `@daily` | Standard debian-flavored `cron` expression for when the backup should run. Use e.g. `0 4 * * *` to back up at 4 AM every night. See the [man page](http://man7.org/linux/man-pages/man8/cron.8.html) or [crontab.guru](https://crontab.guru/) for more.
++`DEBUG` | `false` | Set to `true` to enable `xtrace` and `verbose` shell options.
++`GPG_CIPHER_ALGO` | `aes256` | GnuPG symmetric encryption cipher to use to encrypt the backup.
++`GPG_PASSPHRASE` | _none_ | GnuPG symmetric encryption pass-phrase to use to encrypt the backup.  WARNING: consider using the more secure `GPG_PASSPHRASE_FILE`, which might be a bind mount or a compose secret.
++`GPG_PASSPHRASE_FILE` | `/run/secrets/gpg-passphrase` | A file containing the symmetric encryption pass-phrase to use to encrypt the backup. This is intended to be a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/) but could also be a bind mount.
++`MOKERLINK_HOST` | `${TAILSCALE_HOST}` | Specify the hostname or IP address of the Mokerlink managed network switch. Do not include the final `/`, otherwise backup will fail. Note that the definition of `MOKERLINK_HOST` overrides any `TAILSCALE_HOST` definition.
++`MOKERLINK_PASSWORD` | _none_ | The password to unlock the identity file. WARNING: consider using the more secure `MOKERLINK_PASSWORD_FILE`, which might be a bind mount or a compose secret. Note that the definition of `MOKERLINK_PASSWORD` overrides any `MOKERLINK_PASSWORD_FILE` definition.
++`MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` | A file containing the password to unlock the identity file. This is intended to be a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/) but could also be a bind mount.
++`MOKERLINK_USER` | `remote-backup` | The username to use to access the Mokerlink managed network switch.
++`TAILSCALE_HOST` | _see notes_ | Specify the hostname or IP address of the Mokerlink managed network switch on the Tailscale mesh. Do not include the final `/`, otherwise backup will fail. Used only when `MOKERLINK_HOST` is unset.
++`TZ` | `UTC` | Which timezone should `cron` use, e.g. `America/New_York` or `Europe/Warsaw`. See [full list of available time zones](http://manpages.ubuntu.com/manpages/bionic/man3/DateTime::TimeZone::Catalog.3pm.html).
+ 
+ ## Building
+ 
+@@ -315,6 +247,5 @@ docker run --rm --privileged tonistiigi/binfmt --install all
+ ## Security
+ 
+ See [SECURITY.md](SECURITY.md) for the full threat model, credential handling
+-guidance, SSH host-key verification trade-offs, and S3 hardening recommendations.
+-Report vulnerabilities through the
+-[GitHub Security tab](https://github.com/1121citrus/mokerlink-backup/security).
++guidance, SSH host-key verification trade-offs, S3 hardening recommendations,
++and vulnerability reporting instructions.
+diff --git a/SECURITY.md b/SECURITY.md
+index 18256a1..87cbb0a 100644
+--- a/SECURITY.md
++++ b/SECURITY.md
+@@ -19,7 +19,7 @@ Trusted components: the container host, the Docker daemon, the S3 bucket
+ 
+ The `get-config` script connects to the switch with:
+ 
+-```text
++```
+ -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+ ```
+ 
+@@ -38,11 +38,10 @@ format, so host-key pinning is not currently feasible.
+ - The backup files themselves are optionally GPG-encrypted at rest in S3, so a
+   configuration stolen in transit is the primary residual risk.
+ 
+-**Recommendation:** If the switch SSH server ever begins advertising a stable
+-host key, modify `get-config` to pass
+-`-o UserKnownHostsFile=/root/.ssh/known_hosts -o StrictHostKeyChecking=yes`
+-and mount a `~/.ssh/known_hosts` file into the container (read-only) containing
+-the switch's host key fingerprint.  This would require a code change.
++**Recommendation:** Mount a `~/.ssh/known_hosts` file into the container
++(read-only) containing the switch's host key fingerprint and set
++`SSH_KNOWN_HOSTS_FILE` if the switch SSH server ever begins advertising a stable
++key.
+ 
+ ## Legacy SSH algorithms
+ 
+@@ -54,9 +53,9 @@ connections to the switch and do not affect other SSH usage in the container.
+ ## Credential handling
+ 
+ | Credential | Env var (less secure) | File (recommended) |
+-| --- | --- | --- |
++|---|---|---|
+ | Switch password | `MOKERLINK_PASSWORD` | `MOKERLINK_PASSWORD_FILE` (default: `/run/secrets/mokerlink-password`) |
+-| GPG passphrase | `GPG_PASSPHRASE` | `GPG_PASSPHRASE_FILE` (default: `/run/secrets/gpg-passphrase`) |
++| GPG passphrase  | `GPG_PASSPHRASE`     | `GPG_PASSPHRASE_FILE` (default: `/run/secrets/gpg-passphrase`) |
+ | AWS credentials | — | `AWS_CONFIG_FILE` (default: `/run/secrets/aws-config`) |
+ 
+ **Prefer Docker secrets or read-only bind mounts over environment variables.**
+@@ -82,7 +81,7 @@ For every backup run the script computes a SHA-256 digest of the uncompressed
+ `.tar` archive and uploads it alongside the (possibly compressed and encrypted)
+ backup file:
+ 
+-```text
++```
+ s3://<bucket>/<timestamp>-<host>-mokerlink-<ver>-config-backup.tar.sha256
+ s3://<bucket>/<timestamp>-<host>-mokerlink-<ver>-config-backup.tar[.<ext>[.gpg]]
+ ```
+@@ -133,7 +132,7 @@ Recommended S3 bucket configuration:
+ 
+ ## Dependency provenance
+ 
+-The Docker image is built on `alpine:3.22` (official Docker Hub image).  All
++The Docker image is built on `alpine:3.21` (official Docker Hub image).  All
+ packages are installed from the Alpine package index pinned to version
+ constraints in the `Dockerfile`.  The CI pipeline runs a
+ [Trivy](https://github.com/aquasecurity/trivy) vulnerability scan after every
+@@ -151,5 +150,4 @@ docker buildx imagetools inspect 1121citrus/mokerlink-backup:<version> \
+ 
+ ## Reporting vulnerabilities
+ 
+-Please report security vulnerabilities through the [GitHub Security tab](https://github.com/1121citrus/mokerlink-backup/security).
+-Do not open a public GitHub issue for security vulnerabilities.
++Report security issues to [jim@hanlonsoftware.com](mailto:jim@hanlonsoftware.com).
+diff --git a/build b/build
+index 2fd7584..c7c6dfc 100755
+--- a/build
++++ b/build
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env bash
+ 
+-# build — local CI equivalent for mokerlink-backup.
++# build — Docker image build script for mokerlink-backup.
+ #
+ # Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+ # SPDX-License-Identifier: AGPL-3.0-or-later
+@@ -8,9 +8,6 @@
+ # SYNOPSIS
+ #   build [--push] [--version VERSION] [--platform PLATFORMS]
+ #         [--registry REGISTRY] [--no-sbom] [--no-provenance]
+-#         [--no-lint] [--no-test] [--no-scan]
+-#         [--advise [ADVISEMENTS]] [--advice [ADVISEMENTS]] [--no-advise]
+-#         [--cache CACHE_RULES]
+ #         [--dry-run] [--help]
+ #
+ # OPTIONS
+@@ -21,65 +18,50 @@
+ #                       so that local builds are never confused with released
+ #                       artifacts.
+ #   --platform PLATFORMS
+-#                       Comma-separated list of target platforms for --push.
++#                       Comma-separated list of target platforms.
+ #                       Default: linux/amd64,linux/arm64
+ #   --registry REGISTRY Docker Hub username / registry prefix.
+ #                       Default: 1121citrus
+-#   --no-sbom           Skip generating an SBOM attestation (push only).
+-#   --no-provenance     Skip generating a provenance attestation (push only).
+-#   --no-lint           Skip hadolint Dockerfile check and shellcheck.
+-#   --no-test           Skip running the test suite.
+-#   --no-scan           Skip the Trivy vulnerability scan (gating).
+-#                       Also skips advisements (stage 5) by default; pass --advise
+-#                       after --no-scan to keep the advisory scans.
+-#   --advise [ADVISEMENTS]
+-#                       Run advisory scans. Optional comma-delimited list of advisements:
+-#                       'grype', 'scout', 'dive', 'all', or any combination, e.g. 'grype,scout,dive'
+-#                       (default if no list given: 'grype,scout').
+-#   --advice [ADVISEMENTS]
+-#                       Compatibility alias for --advise.
+-#   --no-advise         Skip all advisory scans (Grype, Docker Scout, and Dive).
+-#   --cache CACHE_RULES One-run cache controls for scanner DBs.
+-#                       Rule format: 'reset=<targets>;skip-update=<targets>'
+-#                       Targets: trivy, grype, all (comma-delimited)
+-#   --dry-run           Print each command without executing it.
++#   --no-sbom           Skip generating an SBOM attestation.
++#   --no-provenance     Skip generating a provenance attestation.
++#   --dry-run           Print the docker buildx command without executing it.
+ #   --help              Print this message and exit.
+ #
+ # ENVIRONMENT
+ #   The following env-var overrides take precedence over the defaults above but
+ #   are themselves overridden by the matching CLI flag:
+ #     BUILD_VERSION, BUILD_PUSH, BUILD_PLATFORM, BUILD_REGISTRY
+-#     BUILD_LINT, BUILD_TEST, BUILD_SCAN, BUILD_ADVISE
+ #
+ # PREREQUISITES
+-#   • docker with the buildx plugin (≥ 0.10)
+-#   • shellcheck on PATH (for lint stage)
+-#   • For --push: docker login <registry> must already be authenticated, plus
+-#     QEMU binfmt helpers for cross-platform builds:
++#   • docker with the buildx plugin (≥ 0.10) and QEMU binfmt helpers installed
++#     for cross-platform builds:
+ #       docker run --rm --privileged tonistiigi/binfmt --install all
++#   • For --push: docker login <registry> must already be authenticated.
+ #
+-# STAGES (run in order; each can be skipped with --no-<stage>)
+-#   1. Lint   — hadolint (Dockerfile) + shellcheck (src/, test/)
+-#   2. Build  — single-platform --load into local Docker daemon
+-#   3. Test   — ./test/run-all against the locally loaded image
+-#   4. Scan   — Trivy CRITICAL/HIGH image scan (blocking)
+-#   5. Advise — multiple advisory scans (advisory only; never blocks the build)
+-#              a) Grype   — full-severity scan
+-#              b) Scout   — Docker Scout CVE scan
+-#              c) Dive    — image layer analysis
+-#   6. Push   — multi-platform rebuild + push to registry (only with --push)
++# PROVENANCE AND SBOM
++#   --sbom=true  embeds a CycloneDX SBOM describing every OS package inside
++#                the image, making it inspectable with:
++#                  docker buildx imagetools inspect <image> --format '{{json .SBOM}}'
++#   --provenance=mode=max  records the full build graph in SLSA provenance
++#                format, auditable with:
++#                  docker buildx imagetools inspect <image> --format '{{json .Provenance}}'
++#   Both are stored as OCI referrers on the registry manifest — they are *not*
++#   embedded in the image layers and do not inflate the runtime image size.
++#
++# NOTES ON BASE IMAGE PINNING
++#   The Dockerfile uses ARG ALPINE_TAG=3.21.  To pin to a specific digest for
++#   fully reproducible builds, set the build-arg at call time:
++#     BUILD_EXTRA_ARGS='--build-arg ALPINE_TAG=3.21@sha256:<digest>' ./build
+ #
+ # EXAMPLES
+-#   # Local dev cycle — lint, build, test, scan
++#   # Local dev build — no push, tagged "dev-<sha>"
+ #   ./build
+ #
+ #   # Release build — push version 1.2.3 and latest
+ #   ./build --push --version 1.2.3
+ #
+-#   # Dry-run: just print each command
+-#   ./build --dry-run
+-#
+-##ENDOFHELP
++#   # Dry-run: just print the buildx command
++#   ./build --push --version 1.2.3 --dry-run
+ 
+ set -euo pipefail
+ 
+@@ -92,123 +74,10 @@ PLATFORMS=${BUILD_PLATFORM:-linux/amd64,linux/arm64}
+ REGISTRY=${BUILD_REGISTRY:-1121citrus}
+ SBOM=true
+ PROVENANCE=true
+-LINT=${BUILD_LINT:-true}
+-TEST=${BUILD_TEST:-true}
+-SCAN=${BUILD_SCAN:-true}
+-ADVISE_GRYPE=true
+-ADVISE_SCOUT=true
+-ADVISE_DIVE=false
+-_ADVISE_EXPLICIT=false   # set true when --advise or --no-advise is passed
+-CACHE_RESET_TRIVY=false
+-CACHE_RESET_GRYPE=false
+-CACHE_SKIP_UPDATE_TRIVY=false
+-CACHE_SKIP_UPDATE_GRYPE=false
+ DRY_RUN=false
+ 
+ IMAGE_NAME=mokerlink-backup
+ 
+-# Tool image references — update these to pin analyser versions project-wide.
+-HADOLINT_IMAGE=hadolint/hadolint
+-HADOLINT_TAG=v2.12.0
+-SHELLCHECK_IMAGE=koalaman/shellcheck
+-SHELLCHECK_TAG=v0.10.0
+-MARKDOWNLINT_IMAGE=ghcr.io/igorshubovych/markdownlint-cli
+-MARKDOWNLINT_TAG=v0.48.0
+-TRIVY_IMAGE=aquasec/trivy
+-TRIVY_TAG=0.62.1
+-GRYPE_IMAGE=anchore/grype
+-GRYPE_TAG=v0.87.0
+-DIVE_IMAGE=wagoodman/dive
+-DIVE_TAG=v0.13.1
+-
+-TRIVY_CACHE_VOLUME=mokerlink-backup-trivy-cache
+-GRYPE_CACHE_VOLUME=mokerlink-backup-grype-cache
+-
+-# ---------------------------------------------------------------------------
+-# Helpers: cache control parsing
+-# ---------------------------------------------------------------------------
+-set_cache_targets() {
+-    local mode="$1"
+-    local targets_csv="$2"
+-    local target
+-    IFS=',' read -ra _cache_targets <<< "${targets_csv}"
+-
+-    for target in "${_cache_targets[@]}"; do
+-        case "${target}" in
+-            trivy)
+-                if [[ "${mode}" == "reset" ]]; then
+-                    CACHE_RESET_TRIVY=true
+-                elif [[ "${mode}" == "skip-update" ]]; then
+-                    CACHE_SKIP_UPDATE_TRIVY=true
+-                fi
+-                ;;
+-            grype)
+-                if [[ "${mode}" == "reset" ]]; then
+-                    CACHE_RESET_GRYPE=true
+-                elif [[ "${mode}" == "skip-update" ]]; then
+-                    CACHE_SKIP_UPDATE_GRYPE=true
+-                fi
+-                ;;
+-            all)
+-                if [[ "${mode}" == "reset" ]]; then
+-                    CACHE_RESET_TRIVY=true
+-                    CACHE_RESET_GRYPE=true
+-                elif [[ "${mode}" == "skip-update" ]]; then
+-                    CACHE_SKIP_UPDATE_TRIVY=true
+-                    CACHE_SKIP_UPDATE_GRYPE=true
+-                fi
+-                ;;
+-            *)
+-                echo "Unknown cache target: ${target}" >&2
+-                exit 1
+-                ;;
+-        esac
+-    done
+-}
+-
+-parse_cache_rules() {
+-    local rules="$1"
+-    local entry
+-    local key
+-    local value
+-    IFS=';' read -ra _cache_rules <<< "${rules}"
+-
+-    for entry in "${_cache_rules[@]}"; do
+-        key="${entry%%=*}"
+-        value="${entry#*=}"
+-        key="${key//[[:space:]]/}"
+-        value="${value//[[:space:]]/}"
+-
+-        if [[ -z "${key}" && -z "${value}" ]]; then
+-            continue
+-        fi
+-
+-        if [[ "${entry}" != *=* || -z "${key}" || -z "${value}" ]]; then
+-            echo "Invalid --cache rule: ${entry}" >&2
+-            exit 1
+-        fi
+-
+-        case "${key}" in
+-            reset|skip-update)
+-                set_cache_targets "${key}" "${value}"
+-                ;;
+-            *)
+-                echo "Unknown --cache rule key: ${key}" >&2
+-                exit 1
+-                ;;
+-        esac
+-    done
+-}
+-
+-reset_cache_db() {
+-    local volume_name="$1"
+-    # Reset the volume by removing all contents and recreating the directory structure
+-    run docker run --rm \
+-        -v "${volume_name}:/cache" \
+-        alpine:3.21 \
+-        sh -c "rm -rf /cache/* && mkdir -p /cache"
+-}
+-
+ # ---------------------------------------------------------------------------
+ # Argument parsing
+ # ---------------------------------------------------------------------------
+@@ -220,49 +89,9 @@ while [[ $# -gt 0 ]]; do
+         --registry)         REGISTRY="$2"; shift ;;
+         --no-sbom)          SBOM=false ;;
+         --no-provenance)    PROVENANCE=false ;;
+-        --no-lint)          LINT=false ;;
+-        --no-test)          TEST=false ;;
+-        --no-scan)          SCAN=false ;;
+-        --advise|--advice)
+-            _ADVISE_EXPLICIT=true
+-            # Check if next arg looks like an advisement list (no -- prefix)
+-            if [[ $# -gt 1 && ! "$2" =~ ^-- ]]; then
+-                advisements="$2"; shift
+-            else
+-                advisements="grype,scout"
+-            fi
+-            # Parse the comma-delimited list
+-            ADVISE_GRYPE=false
+-            ADVISE_SCOUT=false
+-            ADVISE_DIVE=false
+-            IFS=',' read -ra adv_list <<< "$advisements"
+-            for adv in "${adv_list[@]}"; do
+-                case "$adv" in
+-                    grype)  ADVISE_GRYPE=true ;;
+-                    scout)  ADVISE_SCOUT=true ;;
+-                    dive)   ADVISE_DIVE=true ;;
+-                    all)    ADVISE_GRYPE=true; ADVISE_SCOUT=true; ADVISE_DIVE=true ;;
+-                    *)      echo "Unknown advisement: $adv" >&2; exit 1 ;;
+-                esac
+-            done
+-            ;;
+-        --no-advise)
+-            ADVISE_GRYPE=false
+-            ADVISE_SCOUT=false
+-            ADVISE_DIVE=false
+-            _ADVISE_EXPLICIT=true
+-            ;;
+-        --cache)
+-            if [[ $# -lt 2 || "$2" =~ ^-- ]]; then
+-                echo "--cache requires CACHE_RULES" >&2
+-                exit 1
+-            fi
+-            parse_cache_rules "$2"
+-            shift
+-            ;;
+         --dry-run)          DRY_RUN=true ;;
+         --help|-h)
+-            sed -n '3,/^##ENDOFHELP/p' "$0" | grep '^#' | head -n -1 | sed 's/^# \{0,1\}//'
++            sed -n '3,/^# EXAMPLES/p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'
+             exit 0 ;;
+         *)
+             echo "Unknown option: $1" >&2
+@@ -271,17 +100,12 @@ while [[ $# -gt 0 ]]; do
+     shift
+ done
+ 
+-# --no-scan implies --no-advise unless --advise was given explicitly.
+-if [[ "${SCAN}" == "false" && "${_ADVISE_EXPLICIT}" == "false" ]]; then
+-    ADVISE_GRYPE=false
+-    ADVISE_SCOUT=false
+-    ADVISE_DIVE=false
+-fi
+-
+ # ---------------------------------------------------------------------------
+ # Resolve the image version tag.
+ # ---------------------------------------------------------------------------
+ if [[ -z "${VERSION}" ]]; then
++    # Fall back to "dev-<7-char git SHA>" so local builds are distinguishable
++    # from official releases and never accidentally tagged "latest".
+     sha=$(git -C "$(dirname "$0")" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+     VERSION="dev-${sha}"
+ fi
+@@ -297,287 +121,54 @@ if [[ "${PUSH}" == "true" && "${VERSION}" != dev-* ]]; then
+ fi
+ 
+ # ---------------------------------------------------------------------------
+-# Helper: execute a command or print it for --dry-run.
+-# ---------------------------------------------------------------------------
+-run() {
+-    if [[ "${DRY_RUN}" == "true" ]]; then
+-        echo "[DRY RUN]" "$@" >&2
+-    else
+-        "$@"
+-    fi
+-}
+-
+-# Run a command with a timeout (no external 'timeout' binary required).
+-# Backgrounds the command, starts a watchdog that kills it after SECONDS,
+-# then waits.  In --dry-run mode just prints the command.
+-# Usage: _timed SECONDS COMMAND [ARGS...]
+-_timed() {
+-    local secs="$1"; shift
+-    if [[ "${DRY_RUN}" == "true" ]]; then
+-        echo "[DRY RUN] (${secs}s timeout)" "$@" >&2
+-        return 0
+-    fi
+-    "$@" &
+-    local _pid=$!
+-    ( sleep "${secs}" && kill "${_pid}" 2>/dev/null ) &
+-    local _watcher=$!
+-    wait "${_pid}" 2>/dev/null; local _rc=$?
+-    kill "${_watcher}" 2>/dev/null
+-    wait "${_watcher}" 2>/dev/null
+-    return "${_rc}"
+-}
+-
+-# Script directory for build context and relative paths.
+-script_dir=$(dirname "$(readlink -f "$0")")
+-
+-echo "Image:     ${full_image}:${VERSION}" >&2
+-echo "Platforms: ${PLATFORMS}" >&2
+-echo "Push:      ${PUSH}" >&2
+-echo "Trivy DB:  volume:${TRIVY_CACHE_VOLUME}" >&2
+-echo "Grype DB:  volume:${GRYPE_CACHE_VOLUME}" >&2
+-echo "" >&2
+-
+-if [[ "${CACHE_RESET_TRIVY}" == "true" ]]; then
+-    echo "==> Cache: reset Trivy DB" >&2
+-    reset_cache_db "${TRIVY_CACHE_VOLUME}"
+-fi
+-if [[ "${CACHE_RESET_GRYPE}" == "true" ]]; then
+-    echo "==> Cache: reset Grype DB" >&2
+-    reset_cache_db "${GRYPE_CACHE_VOLUME}"
+-fi
+-if [[ "${SCAN}" == "true" && "${CACHE_SKIP_UPDATE_TRIVY}" != "true" ]]; then
+-    echo "==> Cache: warm Trivy DB" >&2
+-    run docker run --rm \
+-        -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
+-        "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
+-            --quiet \
+-            --download-db-only
+-fi
+-
+-# ---------------------------------------------------------------------------
+-# Stage 1: Lint
++# Construct the full buildx command.
+ # ---------------------------------------------------------------------------
+-if [[ "${LINT}" == "true" ]]; then
+-    echo "==> Stage 1: Lint" >&2
+-
+-    echo "    hadolint Dockerfile" >&2
+-    if [[ "${DRY_RUN}" == "true" ]]; then
+-        echo "[DRY RUN] docker run --rm -i hadolint/hadolint < Dockerfile" >&2
+-    else
+-        docker run --rm -i "${HADOLINT_IMAGE}:${HADOLINT_TAG}" < "${script_dir}/Dockerfile"
+-    fi
+-
+-    echo "    shellcheck src/ test/" >&2
+-    (cd "${script_dir}" && run docker run --rm \
+-        -v "${script_dir}:/mnt" \
+-        "${SHELLCHECK_IMAGE}:${SHELLCHECK_TAG}" \
+-        -x \
+-        src/common-functions \
+-        src/bin/backup \
+-        src/bin/get-backup-config \
+-        src/bin/get-config \
+-        src/bin/get-running-config \
+-        src/bin/get-startup-config \
+-        src/bin/healthcheck \
+-        src/bin/mokerlink-backup \
+-        src/bin/startup \
+-        test/run-all \
+-        test/build-options \
+-        test/backup-required-vars \
+-        test/backup-success \
+-        test/backup-encryption \
+-        test/healthcheck \
+-        test/mokerlink-backup \
+-        test/staging \
+-        test/bin/*)
+-
+-    echo "    markdownlint **/*.md" >&2
+-    (cd "${script_dir}" && run docker run --rm \
+-        -v "${script_dir}:/md:ro" \
+-        --workdir /md \
+-        "${MARKDOWNLINT_IMAGE}:${MARKDOWNLINT_TAG}" \
+-        "**/*.md")
+-fi
+-
+-# ---------------------------------------------------------------------------
+-# Stage 2: Build (local, single-platform)
+-# ---------------------------------------------------------------------------
+-echo "==> Stage 2: Build ${full_image}:${VERSION}" >&2
+-
+-host_platform=$(docker info --format '{{.OSType}}/{{.Architecture}}' 2>/dev/null \
+-    || echo "linux/amd64")
+-
+-build_cmd=(
++cmd=(
+     docker buildx build
+-    --platform "${host_platform}"
++    --platform "${PLATFORMS}"
+     "${tags[@]}"
+-    --build-arg "VERSION=${VERSION}"
+-    --load
++    # Software Bill of Materials — lists every OS package in the image.
++    "--sbom=${SBOM}"
++    # SLSA provenance — records the full build graph.
++    "--provenance=mode=max"
+ )
+ 
+-if [[ -n "${BUILD_EXTRA_ARGS:-}" ]]; then
+-    # Word-split intentionally: BUILD_EXTRA_ARGS is caller-controlled.
+-    # shellcheck disable=SC2206
+-    build_cmd+=(${BUILD_EXTRA_ARGS})
+-fi
+-
+-build_cmd+=("${script_dir}")
+-
+-if [[ "${DRY_RUN}" == "true" ]]; then
+-    echo "[DRY RUN] Would execute:" >&2
+-    printf '  %s \\\n' "${build_cmd[@]}"
++# Only add --push / --load depending on the requested mode.  buildx cannot
++# use both simultaneously.
++if [[ "${PUSH}" == "true" ]]; then
++    cmd+=(--push)
+ else
+-    "${build_cmd[@]}"
++    # --load imports the first platform into the local Docker daemon, useful
++    # for smoke-testing without a registry.  Multi-platform local loads are
++    # not supported by Docker; restrict to the current host platform.
++    host_platform=$(docker info --format '{{.OSType}}/{{.Architecture}}' 2>/dev/null \
++        || echo "linux/amd64")
++    cmd+=(--platform "${host_platform}" --load)
+ fi
+ 
+-# ---------------------------------------------------------------------------
+-# Stage 3: Test
+-# ---------------------------------------------------------------------------
+-if [[ "${TEST}" == "true" ]]; then
+-    echo "==> Stage 3: Test" >&2
+-    run chmod +x \
+-        "${script_dir}/test/run-all" \
+-        "${script_dir}/test/build-options" \
+-        "${script_dir}/test/staging" \
+-        "${script_dir}/test/backup-"* \
+-        "${script_dir}/test/healthcheck" \
+-        "${script_dir}/test/bin/"*
+-    # Export IMAGE so each test script targets the image just built.
+-    (cd "${script_dir}" && IMAGE="${full_image}:${VERSION}" run ./test/run-all)
+-fi
+-
+-# ---------------------------------------------------------------------------
+-# Stage 4: Scan (Trivy)
+-# ---------------------------------------------------------------------------
+-if [[ "${SCAN}" == "true" ]]; then
+-    echo "==> Stage 4: Scan ${full_image}:${VERSION}" >&2
+-    _trivy_extra_flags=()
+-    if [[ "${CACHE_SKIP_UPDATE_TRIVY}" == "true" ]]; then
+-        echo "    Trivy DB update skipped for this run (--cache skip-update=trivy)" >&2
+-        _trivy_extra_flags+=(--skip-db-update --skip-java-db-update)
+-    fi
+-    run docker run --rm \
+-        -v /var/run/docker.sock:/var/run/docker.sock:ro \
+-        -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
+-        "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
+-            --quiet \
+-            --no-progress \
+-            --exit-code 1 \
+-            --ignore-unfixed \
+-            --severity HIGH,CRITICAL \
+-            "${_trivy_extra_flags[@]}" \
+-            "${full_image}:${VERSION}"
+-fi
+-
+-# ---------------------------------------------------------------------------
+-# Stage 5a: Advise (Grype — non-gating)
+-# Runs a full-severity Grype scan and prints findings to the build log.
+-# Never sets a non-zero exit code due to vulnerability findings; the build
+-# continues regardless of what Grype reports.
+-#
+-# The image is passed as a tar archive rather than by name: Grype cannot
+-# resolve a local image name without a Docker socket, and the image has
+-# not been pushed to a registry yet.
+-# ---------------------------------------------------------------------------
+-if [[ "${ADVISE_GRYPE}" == "true" ]]; then
+-    echo "==> Stage 5a: Advise (Grype) ${full_image}:${VERSION}" >&2
+-    _grype_env=()
+-    if [[ "${CACHE_SKIP_UPDATE_GRYPE}" == "true" ]]; then
+-        echo "    Grype DB update skipped for this run (--cache skip-update=grype)" >&2
+-        _grype_env+=(-e GRYPE_DB_AUTO_UPDATE=false)
+-    fi
+-    _grype_archive=$(mktemp /tmp/grype-image-XXXXXX.tar)
+-    # shellcheck disable=SC2064
+-    trap "rm -f '${_grype_archive}'" EXIT
+-    if [[ "${DRY_RUN}" == "true" ]]; then
+-        echo "[DRY RUN] docker save ${full_image}:${VERSION} > ${_grype_archive}" >&2
+-    else
+-        docker save "${full_image}:${VERSION}" > "${_grype_archive}"
+-    fi
+-    _timed 300 docker run --rm \
+-        -v "${_grype_archive}:/scan.tar:ro" \
+-        -v "${GRYPE_CACHE_VOLUME}:/root/.cache/grype" \
+-        "${_grype_env[@]}" \
+-        "${GRYPE_IMAGE}:${GRYPE_TAG}" \
+-            docker-archive:/scan.tar || {
+-        echo "    Grype scan timed out or failed (advisory only)" >&2
+-    }
+-    rm -f "${_grype_archive}"
+-    trap - EXIT
+-fi
+-
+-# ---------------------------------------------------------------------------
+-# Stage 5b: Advise (Docker Scout — non-gating)
+-# Runs Docker Scout and prints findings to the build log.
+-# Never sets a non-zero exit code; the build continues regardless.
+-# ---------------------------------------------------------------------------
+-if [[ "${ADVISE_SCOUT}" == "true" ]]; then
+-    echo "==> Stage 5b: Advise (Scout) ${full_image}:${VERSION}" >&2
+-    run docker scout cves "${full_image}:${VERSION}" || true
++# Allow the caller to inject extra build-args, cache flags, etc.
++# Example: BUILD_EXTRA_ARGS='--build-arg ALPINE_TAG=3.21' ./build
++if [[ -n "${BUILD_EXTRA_ARGS:-}" ]]; then
++    # Word-split intentionally: BUILD_EXTRA_ARGS is caller-controlled.
++    # shellcheck disable=SC2206
++    cmd+=(${BUILD_EXTRA_ARGS})
+ fi
+ 
+-# ---------------------------------------------------------------------------
+-# Stage 5c: Advise (Dive — non-gating)
+-# Analyzes image layers for bloat, optimization opportunities, and composition.
+-# Never sets a non-zero exit code; the build continues regardless.
+-# ---------------------------------------------------------------------------
+-if [[ "${ADVISE_DIVE}" == "true" ]]; then
+-    echo "==> Stage 5c: Advise (Dive) ${full_image}:${VERSION}" >&2
+-    # Use the Docker socket directly: docker-archive format from `docker save`
+-    # is incompatible with Dive when the image was cross-compiled via buildx
+-    # (OCI-layout archive vs Docker V2.2 format mismatch → "cannot fetch image").
+-    # Dive doesn't download a vulnerability DB so the socket doesn't hang.
+-    _dive_ci_config=()
+-    if [[ -f "${script_dir}/.dive-ci" ]]; then
+-        _dive_ci_config=(-v "${script_dir}/.dive-ci:/.dive-ci:ro")
+-    fi
+-    run docker run --rm \
+-        -v /var/run/docker.sock:/var/run/docker.sock:ro \
+-        "${_dive_ci_config[@]}" \
+-        "${DIVE_IMAGE}:${DIVE_TAG}" \
+-            --source docker \
+-            --ci \
+-            --ci-config /.dive-ci \
+-            "${full_image}:${VERSION}" || true
+-fi
++# The build context is always the project root (same directory as this script).
++cmd+=("$(dirname "$(readlink -f "$0")")")
+ 
+ # ---------------------------------------------------------------------------
+-# Stage 6: Push (multi-platform)
+-# Only runs when --push is specified; rebuilds for all target platforms.
++# Execute (or print for --dry-run).
+ # ---------------------------------------------------------------------------
+-if [[ "${PUSH}" == "true" ]]; then
+-    echo "==> Stage 6: Push ${full_image}:${VERSION} (${PLATFORMS})" >&2
+-
+-    if [[ "${PROVENANCE}" == "true" ]]; then
+-        provenance_flag="--provenance=mode=max"
+-    else
+-        provenance_flag="--provenance=false"
+-    fi
+-
+-    push_cmd=(
+-        docker buildx build
+-        --platform "${PLATFORMS}"
+-        "${tags[@]}"
+-        --build-arg "VERSION=${VERSION}"
+-        "--sbom=${SBOM}"
+-        "${provenance_flag}"
+-        --push
+-    )
+-
+-    if [[ -n "${BUILD_EXTRA_ARGS:-}" ]]; then
+-        # shellcheck disable=SC2206
+-        push_cmd+=(${BUILD_EXTRA_ARGS})
+-    fi
+-
+-    push_cmd+=("${script_dir}")
++echo "Build: ${full_image}:${VERSION}" >&2
++echo "Platforms: ${PLATFORMS}" >&2
++echo "Push: ${PUSH}" >&2
++echo "" >&2
+ 
+-    if [[ "${DRY_RUN}" == "true" ]]; then
+-        echo "[DRY RUN] Would execute:" >&2
+-        printf '  %s \\\n' "${push_cmd[@]}"
+-    else
+-        "${push_cmd[@]}"
+-    fi
++if [[ "${DRY_RUN}" == "true" ]]; then
++    echo "[DRY RUN] Would execute:"
++    printf '  %s \\\n' "${cmd[@]}"
++    exit 0
+ fi
+ 
+-echo "" >&2
+-echo "Done: ${full_image}:${VERSION}" >&2
++exec "${cmd[@]}"
+diff --git a/src/README.md b/src/README.md
+deleted file mode 100644
+index 9f8372e..0000000
+--- a/src/README.md
++++ /dev/null
+@@ -1,33 +0,0 @@
+-# src — mokerlink-backup source
+-
+-Scripts and libraries installed into the container image.
+-
+-For full script reference documentation — including design notes for `get-config`'s
+-`expect` session, the filename-sidecar mechanism, and the config selection model —
+-see **[src/bin/README.md](bin/README.md)**.
+-
+-## Structure
+-
+-| Path | Purpose |
+-| --- | --- |
+-| `bin/` | Executable scripts installed to `/usr/local/bin` |
+-| `common-functions` | Shared utility library installed to `/usr/local/include/1121citrus/` |
+-
+-## Script summary
+-
+-| Script | Role |
+-| --- | --- |
+-| `bin/mokerlink-backup` | **Primary CLI** — downloads switch configs, streams tar or raw text to stdout |
+-| `bin/get-config` | SSH engine — `expect`-driven SSH session against the Mokerlink firmware |
+-| `bin/get-running-config` | Backward-compat wrapper: `get-config running "$@"` |
+-| `bin/get-startup-config` | Backward-compat wrapper: `get-config startup "$@"` |
+-| `bin/get-backup-config` | Backward-compat wrapper: `get-config backup "$@"` |
+-| `bin/backup` | Legacy service script — fetch, compress, encrypt, upload to S3 |
+-| `bin/startup` | Container entrypoint — writes `.env`, installs crontab, execs `crond` |
+-| `bin/healthcheck` | Docker `HEALTHCHECK` — verifies `crond` and crontab are active |
+-
+-## `common-functions`
+-
+-Shared utility library sourced by `backup`, `startup`, and `healthcheck`.
+-Provides structured logging, `is_true`/`is_false` boolean helpers, and
+-`not_blank` variable guards.
+diff --git a/src/bin/README.md b/src/bin/README.md
+deleted file mode 100644
+index 2385db4..0000000
+--- a/src/bin/README.md
++++ /dev/null
+@@ -1,182 +0,0 @@
+-# src/bin — script reference
+-
+-Scripts installed to `/usr/local/bin` inside the container image.
+-
+----
+-
+-## Script inventory
+-
+-| Script | Role | Entry point |
+-| --- | --- | --- |
+-| `mokerlink-backup` | **Primary CLI** — downloads switch configs, streams tar or raw text to stdout | user / cron |
+-| `get-config` | SSH engine — opens an `expect`-driven SSH session and captures one config type | called by `mokerlink-backup` |
+-| `get-running-config` | Wrapper: `get-config running "$@"` | backward-compat |
+-| `get-startup-config` | Wrapper: `get-config startup "$@"` | backward-compat |
+-| `get-backup-config` | Wrapper: `get-config backup "$@"` | backward-compat |
+-| `backup` | Legacy service script — fetches all configs, compresses, encrypts, uploads to S3 | cron (via `startup`) |
+-| `startup` | Container entrypoint — writes `.env`, installs crontab, hands off to `crond` | `CMD` in Dockerfile |
+-| `healthcheck` | Docker `HEALTHCHECK` — verifies `crond` is running and the crontab is configured | Docker daemon |
+-
+----
+-
+-## Data flow
+-
+-### CLI mode (primary)
+-
+-```text
+-caller
+-  └─ mokerlink-backup [opts]
+-        ├─ get-config running   host user   (via bash, MOKERLINK_PASSWORD in env)
+-        ├─ get-config startup   host user
+-        └─ get-config backup    host user
+-              └─ expect → ssh → Mokerlink firmware CLI
+-                    → "show <type>-config" output → stdout
+-        └─ tar -c *.xml → stdout   (or cat raw text → stdout)
+-```
+-
+-### Legacy service mode
+-
+-```text
+-Docker CMD
+-  └─ startup
+-        └─ crond (daemon)
+-              └─ backup  (on schedule)
+-                    └─ mokerlink-backup  (streams tar to workdir)
+-                    └─ compress  (bzip2 / gzip / xz / …)
+-                    └─ gpg --symmetric  (optional)
+-                    └─ aws s3 mv  →  S3 bucket
+-```
+-
+----
+-
+-## `mokerlink-backup`
+-
+-The user-facing CLI.  Parses options, resolves credentials, calls `get-config`
+-for each selected configuration type, and either tars the XML files to stdout
+-or cats the raw text.
+-
+-### Config selection model
+-
+-Option flags (`-r`, `-s`, `-b`, `--all`, `--no-*`) use `true`/`false` as shell
+-commands (exit codes 0/1), not as string values.  The pattern
+-`if ! "${has_positive}"; then … fi` tests the exit code of the named command.
+-If no positive flag was given, all three configs are selected by default.
+-
+-### Filename sidecar (`MOKERLINK_BACKUP_NAME_FILE`)
+-
+-The tar archive is named after the switch hostname and firmware version, which
+-are discovered only during the SSH session.  When `MOKERLINK_BACKUP_NAME_FILE`
+-is set, `mokerlink-backup` writes the computed basename to that path after the
+-last config is downloaded.  `backup` uses this mechanism to rename the output
+-file without reparsing the tar stream.
+-
+----
+-
+-## `get-config`
+-
+-The SSH engine.  Uses `expect` (Tcl) to drive an interactive SSH session
+-against the Mokerlink firmware CLI.
+-
+-### Why `expect`?
+-
+-The Mokerlink firmware presents an application-layer username/password prompt
+-over SSH and does not support public-key authentication or batch/non-interactive
+-modes.  `expect` is the only practical way to automate this interaction.
+-
+-### SSH flags
+-
+-| Flag | Reason |
+-| --- | --- |
+-| `-F /dev/null` | Ignore `~/.ssh/config`; prevent local settings from interfering |
+-| `StrictHostKeyChecking=no` | Firmware regenerates the host key on every factory reset |
+-| `UserKnownHostsFile=/dev/null` | Prevents stale known-hosts entries from blocking automation |
+-| `+ssh-rsa` (host key and pubkey) | Firmware requires legacy RSA; modern OpenSSH disables it by default |
+-
+-### `expect` session walkthrough
+-
+-1. `log_user 0` — suppress output; only the config body should reach stdout
+-2. SSH connect → firmware presents `Username:` / `Password:` prompts
+-3. `terminal length 0` — disable firmware paging so `show` output is not broken up with `--More--` prompts
+-4. `send "show <type>-config\r"`
+-5. `log_user 1` — start capturing output
+-6. Wait for `#` prompt (end of config body)
+-7. `log_user 0` — stop capturing
+-8. Two-level exit: `exit` from privileged exec (`#`) to user exec (`>`), then `exit` to close the session
+-9. The raw output includes two echo-back lines before `SYSTEM CONFIG FILE ::= BEGIN`; `tail -n +3` strips them
+-
+-### Single-quoted heredoc delimiter
+-
+-```bash
+-/usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
+-```
+-
+-The `'` quoting prevents bash from expanding the Tcl `$env(...)` references
+-inside the heredoc before `expect` reads them.  All parameters are passed via
+-exported environment variables (`EXPECT_CONFIG`, `EXPECT_HOSTNAME`, etc.).
+-Passwords are never passed as positional arguments to avoid exposure in `ps(1)`.
+-
+-### `get-running-config` / `get-startup-config` / `get-backup-config`
+-
+-Thin wrappers that prepend the config-type argument and delegate to
+-`get-config`.  They predate the unified `get-config` dispatcher and are
+-retained for backward compatibility.
+-
+----
+-
+-## `backup` (legacy service script)
+-
+-Orchestrates the full backup pipeline: download → compress → encrypt → upload.
+-
+-### Key design points
+-
+-**Filename sidecar** — `mokerlink-backup` is called with
+-`MOKERLINK_BACKUP_NAME_FILE` pointing to a temp file.  After the download, the
+-basename written there is used to rename the output archive.
+-
+-**SHA256 ordering** — The checksum is computed against the uncompressed tar,
+-before any compression or encryption.  Verification therefore requires
+-decrypting and decompressing first; see *Verify a backup* in the project README.
+-
+-**`aws s3 mv`** — The AWS CLI `mv` sub-command uploads the file and then deletes
+-the local copy on success.  This prevents large archives from accumulating in
+-the workdir across successive cron runs.
+-
+-**Compression** — All compression is read-from-stdin / write-to-stdout to avoid
+-creating additional copies of the (potentially large) tar file in the workdir.
+-
+----
+-
+-## `startup`
+-
+-Container entrypoint for legacy service mode.  Writes all runtime configuration
+-to `~/.env` (the file `crond` and `backup` source at startup), installs a
+-crontab entry, and runs `crond -l 2 -f` in the foreground.  The startup script
+-itself remains PID 1; `crond` runs as a child process.
+-
+-The `.env` write-and-source pattern is needed because `crond` runs jobs with a
+-minimal environment; writing the configuration to a file that each job sources
+-is simpler than passing environment variables through `crond`'s own `ENVFILE`
+-mechanism.
+-
+----
+-
+-## `healthcheck`
+-
+-Checks two conditions:
+-
+-1. `crond` is running (`pidof` with `pgrep` fallback for portability)
+-2. The crontab contains a `/backup` entry
+-
+-Whether the cron job has *run successfully* is not checked: Alpine's `crond`
+-writes no structured execution log, so there is no lightweight way to detect
+-the last run time without an external sentinel file.
+-
+----
+-
+-## Adding a new configuration type
+-
+-1. Add the new type name to the `^(running|startup|backup)$` regex in
+-   `get-config`.
+-2. Add a corresponding `get-<type>-config` wrapper if needed for backward
+-   compatibility.
+-3. Add test coverage in `test/mokerlink-backup` and `test/staging`.
+diff --git a/src/bin/backup b/src/bin/backup
+index e90b1d0..75cff00 100755
+--- a/src/bin/backup
++++ b/src/bin/backup
+@@ -8,12 +8,12 @@
+ # it under the terms of the GNU Affero General Public License as published by
+ # the Free Software Foundation, either version 3 of the License, or
+ # (at your option) any later version.
+-#
++# 
+ # This program is distributed in the hope that it will be useful,
+ # but WITHOUT ANY WARRANTY; without even the implied warranty of
+ # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ # GNU Affero General Public License for more details.
+-#
++# 
+ # You should have received a copy of the GNU Affero General Public License
+ # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ 
+@@ -29,18 +29,39 @@ set -o errexit -o errtrace -o nounset -o pipefail
+ # shellcheck disable=SC1090
+ [[ -r "${ENV}" ]] && source "${ENV}"
+ is_true "${DEBUG:=false}" && set -o xtrace -o verbose
++# future: we may perform additional startup checks here
++
++timestamp=$(date +%Y%m%dT%H%M%S)
++
++# Create a work directory -- to cleanup any debris
++workdir=$(mktemp -d)
++# shellcheck disable=SC2329
++cleanup() {
++    rm -rf "${workdir}" >/dev/null 2>&1 || true
++}
++trap 'cleanup' EXIT
++cd "${workdir}"
+ 
+ export AWS_CONFIG_FILE="${AWS_CONFIG_FILE:=/run/secrets/aws-config}"
+ 
+ bucket="${AWS_S3_BUCKET_NAME:=}"
+ [[ -n "${bucket}" ]] || error 'need AWS_S3_BUCKET_NAME'
+ dryrun="${AWS_DRYRUN:=false}"
++host="${MOKERLINK_HOST:=${TAILSCALE_HOST:=}}"
++[[ -n "${host}" ]] || error 'need MOKERLINK_HOST or TAILSCALE_HOST'
++user="${MOKERLINK_USER:=remote-backup}"
++password=
++if [[ -n "${MOKERLINK_PASSWORD:=}" ]]; then
++    password="${MOKERLINK_PASSWORD}"
++elif [[ -r "${MOKERLINK_PASSWORD_FILE:=/run/secrets/mokerlink-password}" ]]; then
++    password=$(cat "${MOKERLINK_PASSWORD_FILE}")
++fi
++[[ -n "${password}" ]] || error 'need MOKERLINK_PASSWORD or MOKERLINK_PASSWORD_FILE (default: /run/secrets/mokerlink-password)'
+ 
+ gpg_encrypt=false
+ gpg_args=(--symmetric --cipher-algo "${GPG_CIPHER_ALGO:=aes256}" --batch)
+ if [[ -n "${GPG_PASSPHRASE:=}" ]]; then
+-    # Use passphrase-fd to avoid exposing passphrase in process list (argv)
+-    gpg_args+=(--passphrase-fd 3)
++    gpg_args+=(--passphrase "${GPG_PASSPHRASE}")
+     gpg_encrypt=true
+ elif [[ -r "${GPG_PASSPHRASE_FILE:=/run/secrets/gpg-passphrase}" ]]; then
+     gpg_args+=(--passphrase-file "${GPG_PASSPHRASE_FILE}")
+@@ -49,34 +70,30 @@ fi
+ 
+ info "begin ${command}"
+ 
+-# Create a work directory for compression, encryption, and upload staging.
+-workdir=$(mktemp -d)
+-# shellcheck disable=SC2329
+-cleanup() {
+-    # shellcheck disable=SC2317
+-    rm -rf "${workdir}" >/dev/null 2>&1 || true
+-}
+-trap 'cleanup' EXIT
+-
+-# Fetch all switch configurations and stream into a named tar archive.
+-
+-# mokerlink-backup derives the tar filename from the switch hostname and
+-# firmware version, which are not known until the SSH session completes.
+-# MOKERLINK_BACKUP_NAME_FILE is a sidecar path: mokerlink-backup writes the
+-# computed basename there so this script can rename the archive correctly
+-# without parsing the tar stream itself.
+-name_file="${workdir}/.backup-name"
+-MOKERLINK_BACKUP_NAME_FILE="${name_file}" \
+-    mokerlink-backup > "${workdir}/backup.tar.tmp"
+-backup_file=$(cat "${name_file}")
+-mv "${workdir}/backup.tar.tmp" "${workdir}/${backup_file}"
+-cd "${workdir}"
+-
+-# Checksum the uncompressed tar before compression and encryption so the
+-# digest covers the exact archive contents, independent of the outer
+-# compression or encryption envelope.  Verification requires decrypting and
+-# decompressing first; see 'Verify a backup' in the README.
++for config in "running" "startup" "backup"; do
++    info "download '${config}' configuration from '${host}'"
++    config_tmp=$(mktemp)
++    # Pass password via env var rather than as a positional arg to avoid
++    # exposing it in the process list (visible to ps(1)).
++    MOKERLINK_PASSWORD="${password}" \
++        bash "${bindir}/get-config" "${config}" "${host}" "${user}" >> "${config_tmp}"
++    version=$(grep -m1 '^! System Version: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g' | sed 's/^v//g')
++    is_true "${DEBUG}" && debug "version='$version'"
++    [[ -n "${version}" ]] || error 'invalid Mokerlink configuration file - missing version'
++    hostname=$(grep -m1 '^! System Name: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g')
++    is_true "${DEBUG}" && debug "hostname='$hostname'"
++    [[ -n "${hostname}" ]] || error 'invalid Mokerlink configuration file - missing hostname'
++    backup_file="${timestamp}-${hostname}-mokerlink-${version}-${config}-config-backup.xml"
++    is_true "${DEBUG}" && debug "backup_file='$backup_file'"
++    # Add header to pulled XML file
++    (echo 'SYSTEM CONFIG FILE ::= BEGIN' && \
++     echo "! Backup: ${backup_file}" && \
++     tail -n +2 "${config_tmp}") > "${backup_file}"
++    info "completed download of '${config}' configuration from '${host}'"
++done
++backup_file="${timestamp}-${hostname}-mokerlink-${version}-config-backup.tar"
+ shafile="${backup_file}.sha256"
++tar -cf "${backup_file}" -- *.xml
+ sha256sum "${backup_file}" > "${shafile}"
+ output_file="${backup_file}"
+ 
+@@ -86,13 +103,13 @@ case "${COMPRESSION:=none}" in
+         bzip2 -9 --keep --quiet --stdout  <"${output_file}" >"${output_file}.bz2"
+         output_file="${output_file}.bz2"
+         ;;
+-
++ 
+     bzip3)
+         info "compressing backup with bzip3: ${output_file}.bz3"
+         bzip3 --batch --keep --stdout "${output_file}" >"${output_file}.bz3"
+         output_file="${output_file}.bz3"
+         ;;
+-
++ 
+     gz | gzip)
+         info "compressing backup with gzip --best --no-name --quiet --synchronous: ${output_file}.gz"
+         gzip --best --no-name --quiet --synchronous <"${output_file}" >"${output_file}.gz"
+@@ -140,13 +157,7 @@ esac
+ 
+ if "${gpg_encrypt}"; then
+     info "encrypting backup with 'gpg' (GnuPG)"
+-    if [[ -n "${GPG_PASSPHRASE:=}" ]]; then
+-        # Pass passphrase via fd 3 to avoid exposing it in process list
+-        gpg "${gpg_args[@]}" --output "${output_file}.gpg" "${output_file}" 3<<<"${GPG_PASSPHRASE}"
+-    else
+-        # No passphrase, just use passphrase-file
+-        gpg "${gpg_args[@]}" --output "${output_file}.gpg" "${output_file}"
+-    fi
++    gpg "${gpg_args[@]}" --output "${output_file}.gpg" "${output_file}"
+     output_file="${output_file}.gpg"
+ fi
+ 
+@@ -158,8 +169,6 @@ is_true "${dryrun}" && awsargs+=(--dryrun)
+ uri="s3://${bucket}/${output_file}"
+ shauri="s3://${bucket}/${shafile}"
+ info "upload backup: '${output_file}' → '${uri}'"
+-# `s3 mv` (not `cp`) deletes the local file after a successful upload,
+-# preventing unbounded accumulation of large archives in the workdir.
+ aws s3 mv "${awsargs[@]}" "${output_file}" "${uri}" 2>&1 | info || \
+     error "aws s3 mv '${output_file}' failed"
+ info "upload checksum: '${shafile}' → '${shauri}'"
+@@ -168,3 +177,4 @@ aws s3 mv "${awsargs[@]}" "${shafile}" "${shauri}" 2>&1 | info || \
+ info "completed upload to S3 bucket '${bucket}'"
+ info "finish ${command}"
+ exit 0
++
+diff --git a/src/bin/get-backup-config b/src/bin/get-backup-config
+index 9b11329..95c3450 100755
+--- a/src/bin/get-backup-config
++++ b/src/bin/get-backup-config
+@@ -1,12 +1,5 @@
+ #!/usr/bin/env bash
+ 
+-# Convenience wrapper: fetch the backup configuration from a Mokerlink switch.
+-# Delegates to get-config with 'backup' as the first argument.
+-# Retained for backward compatibility with callers that invoke it directly.
+-#
+-# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+-# SPDX-License-Identifier: AGPL-3.0-or-later
+-
+ bindir=$(readlink -f "$(dirname "${0}")")
+ 
+ "${bindir}/get-config" backup "${@}"
+diff --git a/src/bin/get-config b/src/bin/get-config
+index 5512da6..8c62499 100755
+--- a/src/bin/get-config
++++ b/src/bin/get-config
+@@ -26,7 +26,7 @@ source /usr/local/include/bash/common-functions
+ set -o errexit -o errtrace -o nounset -o pipefail
+ 
+ expect_args=()
+-if is_true "${DEBUG:=false}"; then expect_args+=(-d); fi
++is_true "${DEBUG:=false}" && expect_args+=(-d) || true
+ 
+ function __show_config_raw__() {
+     local config="${1:?Need configuration name}"
+@@ -37,9 +37,6 @@ function __show_config_raw__() {
+     # Default 30s.  Set to 0 to disable (not recommended — the process will
+     # hang indefinitely if the switch is unreachable).
+     local timeout="${SSH_CONNECT_TIMEOUT:-30}"
+-    # Pass parameters as environment variables rather than positional args.
+-    # The heredoc delimiter is single-quoted so bash does not expand the
+-    # Tcl $env(...) references inside the script before expect reads them.
+     EXPECT_CONFIG="${config}" \
+     EXPECT_HOSTNAME="${hostname}" \
+     EXPECT_USERNAME="${username}" \
+@@ -47,45 +44,27 @@ function __show_config_raw__() {
+     EXPECT_TIMEOUT="${timeout}" \
+     /usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
+ log_user 0
+-# Increase match_max to accommodate large switch configs (ACLs, routing tables, port definitions).
+-# Default 2000 is too small for enterprise-scale Mikrotik switches.
+-set match_max 1000000
+ # Use the caller-supplied timeout; 0 means no timeout (not recommended).
+ set timeout $env(EXPECT_TIMEOUT)
+ set config $env(EXPECT_CONFIG)
+ set hostname $env(EXPECT_HOSTNAME)
+ set username $env(EXPECT_USERNAME)
+ set password $env(EXPECT_PASSWORD)
+-# -F /dev/null: ignore ~/.ssh/config to prevent local settings from
+-#   interfering.
+-# StrictHostKeyChecking=no + UserKnownHostsFile=/dev/null: the Mokerlink
+-#   firmware regenerates its host key on every factory reset; a known-hosts
+-#   file would block automation after any reset.
+-# +ssh-rsa: modern OpenSSH disables ssh-rsa by default; the Mokerlink
+-#   firmware does not support the newer key exchange algorithms.
+ spawn ssh -F /dev/null -T -o LogLevel=quiet -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null -o HostKeyAlgorithms=+ssh-rsa \
+       -o PubkeyAcceptedAlgorithms=+ssh-rsa -l $username $hostname
+-# The firmware presents an application-layer login prompt over the SSH
+-# channel and does not support public-key authentication.
++match_max 100000
+ expect "Username: "
+ send -- "$username\r"
+ expect "Password: "
+ send -- "$password\r"
+ expect "# "
+-# Disable the firmware's built-in output pager so `show` commands stream
+-# their full output without --More-- interruptions.
+ send -- "terminal length 0\r"
+ expect "# "
+ send -- "show $config-config\r"
+-# log_user 1/0 brackets the config output: only the text between these two
+-# calls (the actual config body) reaches the caller's stdout; the surrounding
+-# session noise is suppressed.
+ log_user 1
+ expect "# "
+ log_user 0
+-# The firmware has two CLI levels: privileged exec (#) and user exec (>).
+-# First `exit` steps down from # to >; second `exit` closes the session.
+ send -- "exit\r"
+ expect "> "
+ send -- "exit\r"
+@@ -114,10 +93,10 @@ elif [[ -r "${MOKERLINK_PASSWORD_FILE:=/run/secrets/mokerlink-password}" ]]; the
+ fi
+ [[ -n "${password}" ]] || error 'need password, or set MOKERLINK_PASSWORD or MOKERLINK_PASSWORD_FILE (default: /run/secrets/mokerlink-password) environment variable'
+ 
+-# The firmware echoes the command twice before emitting the config body:
+-#   show running-config\r\n
+-#   show running-config\r\n
+-#   SYSTEM CONFIG FILE ::= BEGIN
+-#   ...
+-# Strip those two echo-back lines so only the config body reaches stdout.
++# The raw output starts:
++#     show ${config}-config
++#     show ${config}-config
++#     SYSTEM CONFIG FILE ::= BEGIN
++# Remove the first two lines
++
+ __show_config_raw__ "${config}" "${host}" "${user}" "${password}" | tail -n +3
+diff --git a/src/bin/get-running-config b/src/bin/get-running-config
+index 3d0cbb5..534a679 100755
+--- a/src/bin/get-running-config
++++ b/src/bin/get-running-config
+@@ -1,12 +1,5 @@
+ #!/usr/bin/env bash
+ 
+-# Convenience wrapper: fetch the running configuration from a Mokerlink switch.
+-# Delegates to get-config with 'running' as the first argument.
+-# Retained for backward compatibility with callers that invoke it directly.
+-#
+-# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+-# SPDX-License-Identifier: AGPL-3.0-or-later
+-
+ bindir=$(readlink -f "$(dirname "${0}")")
+ 
+ "${bindir}/get-config" running "${@}"
+diff --git a/src/bin/get-startup-config b/src/bin/get-startup-config
+index c9acf46..290dda9 100755
+--- a/src/bin/get-startup-config
++++ b/src/bin/get-startup-config
+@@ -1,12 +1,5 @@
+ #!/usr/bin/env bash
+ 
+-# Convenience wrapper: fetch the startup configuration from a Mokerlink switch.
+-# Delegates to get-config with 'startup' as the first argument.
+-# Retained for backward compatibility with callers that invoke it directly.
+-#
+-# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+-# SPDX-License-Identifier: AGPL-3.0-or-later
+-
+ bindir=$(readlink -f "$(dirname "${0}")")
+ 
+ "${bindir}/get-config" startup "${@}"
+diff --git a/src/bin/healthcheck b/src/bin/healthcheck
+index 7da1f92..0541c04 100755
+--- a/src/bin/healthcheck
++++ b/src/bin/healthcheck
+@@ -31,19 +31,14 @@ set -o errexit -o errtrace -o nounset -o pipefail
+ is_true "${DEBUG:-false}" && set -o xtrace -o verbose
+ 
+ function has_cronjob_run() {
+-    # Alpine's crond writes no structured execution log, so there is no
+-    # lightweight way to determine when the job last ran without adding an
+-    # external sentinel file.  Return true unconditionally; only cron
+-    # misconfiguration (missing crond or crontab) is detected.
++    # not implemented; treat as healthy so only config/cron issues are detected
+     true
+ }
+ 
+ function is_crond_running() {
+-    # pidof is provided by busybox on Alpine; pgrep (procps) is the fallback
+-    # for images where pidof is absent or restricted.
+     if pidof crond >/dev/null 2>&1; then
+         return 0
+-    elif pgrep -q crond; then
++    elif ps aux | grep -Eq '[c]rond( |$)'; then
+         return 0
+     else
+         error crond is not running
+@@ -51,7 +46,7 @@ function is_crond_running() {
+ }
+ 
+ function is_crontab_configured() {
+-    if (crontab -l | grep -q '/backup'); then
++    if (crontab -l | grep -q " ${bindir}/backup 2>&1"); then
+         return 0
+     else
+         error crontab is not configured
+@@ -63,3 +58,4 @@ function is_healthy() {
+ }
+ 
+ is_healthy || exit 1
++
+diff --git a/src/bin/mokerlink-backup b/src/bin/mokerlink-backup
+deleted file mode 100755
+index a07d784..0000000
+--- a/src/bin/mokerlink-backup
++++ /dev/null
+@@ -1,326 +0,0 @@
+-#!/usr/bin/env bash
+-
+-# Download a backup of a Mokerlink managed network switch.
+-#
+-# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+-#
+-# This program is free software: you can redistribute it and/or modify
+-# it under the terms of the GNU Affero General Public License as published by
+-# the Free Software Foundation, either version 3 of the License, or
+-# (at your option) any later version.
+-#
+-# This program is distributed in the hope that it will be useful,
+-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-# GNU Affero General Public License for more details.
+-#
+-# You should have received a copy of the GNU Affero General Public License
+-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-#
+-# SYNOPSIS
+-#   mokerlink-backup [options]
+-#
+-# DESCRIPTION
+-#   Connects to a Mokerlink managed switch, downloads the selected
+-#   configurations (running, startup, and/or backup), and outputs them as
+-#   a tar archive (default) or as raw text to stdout.  All progress
+-#   messages go to stderr.
+-#
+-#   If MOKERLINK_BACKUP_NAME_FILE is set to a writable path, the computed
+-#   base filename for the tar archive is written there so callers can name
+-#   the output file appropriately (tar format only).
+-#
+-# OPTIONS
+-#   -?,--help              Display this help text
+-#   -v,--version           Display command version
+-#   -a,--all               Include all configurations (default)
+-#   -r,--running           Include running configuration
+-#      --no-running        Exclude running configuration
+-#   -s,--startup           Include startup configuration
+-#      --no-startup        Exclude startup configuration
+-#   -b,--backup            Include backup configuration
+-#      --no-backup         Exclude backup configuration
+-#   -f,--format FMT        Output format: 'raw' or 'tar'
+-#                          (env: MOKERLINK_FORMAT; default: 'tar')
+-#   -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST)
+-#   -u,--user USER         SSH username (env: MOKERLINK_USER;
+-#                          default: remote-backup)
+-#   -p,--password PW       Password (env: MOKERLINK_PASSWORD)
+-#   -P,--password-file FILE
+-#                          Password file (env: MOKERLINK_PASSWORD_FILE;
+-#                          default: /run/secrets/mokerlink-password)
+-#
+-# ENVIRONMENT
+-#   MOKERLINK_HOST         Switch hostname or IP address
+-#   MOKERLINK_FORMAT       Output format: 'raw' or 'tar' (default: 'tar')
+-#   MOKERLINK_USER         SSH username (default: remote-backup)
+-#   MOKERLINK_PASSWORD     Switch login password
+-#   MOKERLINK_PASSWORD_FILE
+-#                          Path to password file
+-#                          (default: /run/secrets/mokerlink-password)
+-#   TAILSCALE_HOST         Fallback hostname when MOKERLINK_HOST is unset
+-#   MOKERLINK_BACKUP_NAME_FILE
+-#                          (tar format only) Path to write computed tar filename
+-#   DEBUG                  Enable debug tracing (default: false)
+-#   ENV                    Env-file path (default: ~/.env)
+-#
+-# EXAMPLES
+-#   # Download all configuration as a tarball:
+-#   mokerlink-backup --host switch --user backup-user \
+-#       --password-file secret-pw-file > switch-backup.tar
+-#
+-#   # Print the running switch configuration to stdout:
+-#   mokerlink-backup --host switch --user backup-user \
+-#       --password-file secret-pw-file --running --format raw
+-
+-command=$(basename "${0}")
+-bindir=$(readlink -f "$(dirname "${0}")")
+-export PATH=${bindir}:${PATH}
+-
+-# shellcheck disable=SC1091
+-source /usr/local/include/bash/common-functions
+-
+-ENV=${ENV:-${HOME:-/root}/.env}
+-set -o errexit -o errtrace -o nounset -o pipefail
+-# shellcheck disable=SC1090
+-[[ -r "${ENV}" ]] && source "${ENV}"
+-is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+-
+-show_help() {
+-    cat <<'EOF'
+-Usage: mokerlink-backup [options]
+-
+-Download a backup of a Mokerlink managed network switch.
+-
+-Options:
+-  -?,--help              Display this help text
+-  -v,--version           Display command version
+-  -a,--all               Include all configurations (default)
+-  -r,--running           Include running configuration
+-     --no-running        Exclude running configuration
+-  -s,--startup           Include startup configuration
+-     --no-startup        Exclude startup configuration
+-  -b,--backup            Include backup configuration
+-     --no-backup         Exclude backup configuration
+-  -f,--format FMT        Output format: 'raw' or 'tar'
+-                         (env: MOKERLINK_FORMAT; default: 'tar')
+-  -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST)
+-  -u,--user USER         SSH username (env: MOKERLINK_USER;
+-                         default: remote-backup)
+-  -p,--password PW       Password (env: MOKERLINK_PASSWORD)
+-  -P,--password-file FILE
+-                         Password file (env: MOKERLINK_PASSWORD_FILE;
+-                         default: /run/secrets/mokerlink-password)
+-
+-Note: The switch is accessed via SSH using legacy algorithms required by the
+-Mokerlink firmware. See the README for security considerations.
+-
+-Examples:
+-  # Download all configuration as a tarball:
+-  mokerlink-backup --host switch --user backup-user \
+-      --password-file secret-pw-file > switch-backup.tar
+-
+-  # Print the running switch configuration to stdout:
+-  mokerlink-backup --host switch --user backup-user \
+-      --password-file secret-pw-file --running --format raw
+-EOF
+-}
+-
+-show_version() {
+-    cat /usr/local/share/mokerlink-backup/version 2>/dev/null || echo "unknown"
+-}
+-
+-# Defaults from environment
+-format="${MOKERLINK_FORMAT:-tar}"
+-host="${MOKERLINK_HOST:-${TAILSCALE_HOST:-}}"
+-user="${MOKERLINK_USER:-remote-backup}"
+-password="${MOKERLINK_PASSWORD:-}"
+-password_file="${MOKERLINK_PASSWORD_FILE:-/run/secrets/mokerlink-password}"
+-
+-# Config selection state.
+-# 'true' and 'false' here are shell commands (exit 0 and exit 1), not
+-# strings.  The pattern `if ! "${has_positive}"; then` runs the named
+-# command and tests its exit code, making these variables act as booleans.
+-has_positive=false
+-exclude_running=false
+-exclude_startup=false
+-exclude_backup=false
+-select_running=
+-select_startup=
+-select_backup=
+-
+-# Parse arguments
+-while [[ $# -gt 0 ]]; do
+-    case "$1" in
+-        -\?|--help)
+-            show_help
+-            exit 0
+-            ;;
+-        -v|--version)
+-            show_version
+-            exit 0
+-            ;;
+-        -a|--all)
+-            has_positive=true
+-            select_running=true
+-            select_startup=true
+-            select_backup=true
+-            ;;
+-        -r|--running)
+-            has_positive=true
+-            select_running=true
+-            ;;
+-        --no-running)
+-            exclude_running=true
+-            ;;
+-        -s|--startup)
+-            has_positive=true
+-            select_startup=true
+-            ;;
+-        --no-startup)
+-            exclude_startup=true
+-            ;;
+-        -b|--backup)
+-            has_positive=true
+-            select_backup=true
+-            ;;
+-        --no-backup)
+-            exclude_backup=true
+-            ;;
+-        -f|--format)
+-            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+-            format="$2"
+-            shift
+-            ;;
+-        -H|--host)
+-            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+-            host="$2"
+-            shift
+-            ;;
+-        -u|--user)
+-            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+-            user="$2"
+-            shift
+-            ;;
+-        -p|--password)
+-            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+-            password="$2"
+-            shift
+-            ;;
+-        -P|--password-file)
+-            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+-            password_file="$2"
+-            shift
+-            ;;
+-        --)
+-            shift
+-            break
+-            ;;
+-        -*)
+-            error "unknown option: '${1}'"
+-            ;;
+-        *)
+-            error "unexpected argument: '${1}'"
+-            ;;
+-    esac
+-    shift
+-done
+-
+-# If no positive selection was made, default to all
+-if ! "${has_positive}"; then
+-    select_running=true
+-    select_startup=true
+-    select_backup=true
+-fi
+-
+-# Apply defaults (unset → false) then exclusions
+-select_running="${select_running:-false}"
+-select_startup="${select_startup:-false}"
+-select_backup="${select_backup:-false}"
+-if "${exclude_running}"; then select_running=false; fi
+-if "${exclude_startup}"; then select_startup=false; fi
+-if "${exclude_backup}"; then select_backup=false; fi
+-
+-# Validate format
+-case "${format}" in
+-    raw|tar) ;;
+-    *) error "unknown format: '${format}' (expected 'raw' or 'tar')" ;;
+-esac
+-
+-# Validate at least one config selected
+-if ! is_true "${select_running}" && ! is_true "${select_startup}" && ! is_true "${select_backup}"; then
+-    error "no configurations selected (all excluded)"
+-fi
+-
+-# Resolve connection parameters
+-[[ -n "${host}" ]] || error 'need MOKERLINK_HOST or TAILSCALE_HOST (or --host / -H)'
+-if [[ -z "${password}" ]] && [[ -r "${password_file}" ]]; then
+-    password=$(cat "${password_file}")
+-fi
+-[[ -n "${password}" ]] || error 'need MOKERLINK_PASSWORD, --password, or --password-file (default: /run/secrets/mokerlink-password)'
+-
+-info "begin ${command}"
+-
+-timestamp=$(date +%Y%m%dT%H%M%S)
+-
+-# Create a work directory -- to cleanup any debris
+-workdir=$(mktemp -d)
+-# shellcheck disable=SC2329
+-cleanup() {
+-    # shellcheck disable=SC2317
+-    rm -rf "${workdir}" >/dev/null 2>&1 || true
+-}
+-trap 'cleanup' EXIT
+-cd "${workdir}"
+-
+-hostname=
+-version=
+-configs=()
+-is_true "${select_running}" && configs+=(running)
+-is_true "${select_startup}" && configs+=(startup)
+-is_true "${select_backup}" && configs+=(backup)
+-
+-for config in "${configs[@]}"; do
+-    info "download '${config}' configuration from '${host}'"
+-    config_tmp=$(mktemp)
+-    # Pass password via env var rather than as a positional arg to avoid
+-    # exposing it in the process list (visible to ps(1)).
+-    MOKERLINK_PASSWORD="${password}" \
+-        bash "${bindir}/get-config" "${config}" "${host}" "${user}" >> "${config_tmp}"
+-    # Extract version from "! System Version:  v1.0.0.27":
+-    #   cut -f2 -d:  → "  v1.0.0.27" (field after first colon)
+-    #   sed 1        → strip leading whitespace
+-    #   sed 2        → strip trailing whitespace
+-    #   sed 3        → remove the leading 'v' prefix the firmware adds
+-    version=$(grep -m1 '^! System Version: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g' | sed 's/^v//g')
+-    is_true "${DEBUG}" && debug "version='$version'"
+-    [[ -n "${version}" ]] || error 'invalid Mokerlink configuration file - missing version'
+-    hostname=$(grep -m1 '^! System Name: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g')
+-    is_true "${DEBUG}" && debug "hostname='$hostname'"
+-    [[ -n "${hostname}" ]] || error 'invalid Mokerlink configuration file - missing hostname'
+-    if [[ "${format}" == "tar" ]]; then
+-        xml_file="${timestamp}-${hostname}-mokerlink-${version}-${config}-config-backup.xml"
+-        is_true "${DEBUG}" && debug "xml_file='$xml_file'"
+-        # Add header to pulled config file
+-        (echo 'SYSTEM CONFIG FILE ::= BEGIN' && \
+-         echo "! Backup: ${xml_file}" && \
+-         tail -n +2 "${config_tmp}") > "${xml_file}"
+-    else
+-        cat "${config_tmp}"
+-    fi
+-    info "completed download of '${config}' configuration from '${host}'"
+-done
+-
+-if [[ "${format}" == "tar" ]]; then
+-    tar_name="${timestamp}-${hostname}-mokerlink-${version}-config-backup.tar"
+-    is_true "${DEBUG}" && debug "tar_name='${tar_name}'"
+-    # ':=' assigns empty string when the variable is unset, preventing a
+-    # nounset error; the block runs only when the caller provided a path.
+-    if [[ -n "${MOKERLINK_BACKUP_NAME_FILE:=}" ]]; then
+-        printf '%s' "${tar_name}" > "${MOKERLINK_BACKUP_NAME_FILE}"
+-    fi
+-    info "streaming tar archive: ${tar_name}"
+-    tar -c -- *.xml
+-fi
+-
+-info "finish ${command}"
+diff --git a/src/bin/startup b/src/bin/startup
+index ac7018c..bc35ae8 100755
+--- a/src/bin/startup
++++ b/src/bin/startup
+@@ -54,7 +54,7 @@ clean-credentials() {
+     sed -E 's/(GPG_PASSPHRASE|MOKERLINK_PASSWORD)='"'"'.*'"'"'$/\1='"'**REDACTED**'"'/' 
+ }
+ info "create env file ${ENV}"
+-clean-credentials < "${ENV}" | info
++cat "${ENV}" | clean-credentials | info
+ # shellcheck disable=SC1090
+ source "${ENV}"
+ 
+@@ -67,4 +67,4 @@ chmod -c 0600 /var/spool/cron/crontabs/root | info
+ info "crontab: $(cat /var/spool/cron/crontabs/root)"
+ 
+ info "handing the reins over to cron daemon"
+-exec crond -l 2 -f
++crond -l 2 -f
+diff --git a/src/common-functions b/src/common-functions
+index 0b59902..e481ed8 100644
+--- a/src/common-functions
++++ b/src/common-functions
+@@ -25,7 +25,7 @@ function __log() {
+ function log() {
+     local severity=${1:?Need severity}
+     shift
+-    if [[ -n "${*:-}" ]]; then
++    if [[ -n "${@:-}" ]]; then
+         __log "${severity}" "${@}"
+     else
+         while read -r line; do
+diff --git a/test/README.md b/test/README.md
+deleted file mode 100644
+index 6bbe1b4..0000000
+--- a/test/README.md
++++ /dev/null
+@@ -1,35 +0,0 @@
+-# test — mokerlink-backup test suite
+-
+-For detailed test documentation see **[TESTING.md](TESTING.md)**.
+-
+-## Quick start
+-
+-```sh
+-# Run the full automated suite via the build script:
+-./build --no-scan
+-
+-# Run the automated suite directly:
+-IMAGE=1121citrus/mokerlink-backup:dev-abc1234 test/run-all
+-
+-# Pre-release staging (requires live switch + credentials):
+-IMAGE=1121citrus/mokerlink-backup:1.2.3 \
+-  MOKERLINK_HOST=10.0.0.1 \
+-  MOKERLINK_PASSWORD=secret \
+-  test/staging
+-```
+-
+-## Structure
+-
+-| Path | Purpose |
+-| --- | --- |
+-| `run-all` | Runner — executes all automated tests |
+-| `mokerlink-backup` | CLI option parsing, flag validation, output format |
+-| `backup-required-vars` | Required-variable validation for the `backup` script |
+-| `backup-success` | Successful backup across all compression algorithms |
+-| `backup-encryption` | GPG encryption paths |
+-| `healthcheck` | Container health check scenarios |
+-| `build-options` | `build` and `staging` script option parsing |
+-| `staging` | Manual pre-release end-to-end tests (live switch) |
+-| `bin/` | Test stubs (`get-config`, `aws`) |
+-| `fixtures/` | Static data used by tests |
+-| `TESTING.md` | Full test documentation |
+diff --git a/test/TESTING.md b/test/TESTING.md
+deleted file mode 100644
+index b83536c..0000000
+--- a/test/TESTING.md
++++ /dev/null
+@@ -1,207 +0,0 @@
+-# Testing
+-
+-## Overview
+-
+-The test suite is split into two tiers:
+-
+-| Tier | Scripts | Requires | Run by |
+-| --- | --- | --- | --- |
+-| Automated | `run-all` and its constituent scripts | Docker only | `./build` |
+-| Manual integration | `staging` | Live switch + credentials | Developer |
+-
+----
+-
+-## Automated tests (`test/run-all`)
+-
+-`run-all` is the CI-suitable suite.  It is invoked automatically by `./build`
+-during stage 3 and requires nothing beyond a local Docker daemon.  All switch
+-interaction is replaced by the stub at `test/bin/get-config`.
+-
+-### Constituent test scripts
+-
+-| Script | What it tests |
+-| --- | --- |
+-| `build-options` | `build` option parsing for `--advice` alias and `--cache`; `staging --help` coverage for `--scan`/`--advise` |
+-| `mokerlink-backup` | CLI option parsing, flag validation, tar/raw output format, config selection flags (`-r`, `-s`, `-b`, `--no-*`) |
+-| `backup-required-vars` | `backup` script rejects missing `AWS_S3_BUCKET_NAME`, `MOKERLINK_HOST`, and password; accepts `TAILSCALE_HOST` fallback and password file |
+-| `backup-success` | `backup` script succeeds for each supported compression algorithm; tar archive contains all three config files |
+-| `backup-encryption` | GPG encryption is applied when a passphrase is available; skipped when none is |
+-| `healthcheck` | `healthcheck` exits non-zero when `crond` is absent or crontab is missing; exits zero when both are present |
+-
+-### Running
+-
+-```console
+-# Via the build script (recommended — also lints, builds, and scans)
+-./build --no-scan
+-
+-# Directly, against a specific image
+-IMAGE=1121citrus/mokerlink-backup:dev-abc1234 test/run-all
+-```
+-
+-The `IMAGE` environment variable selects which image to test.  When omitted,
+-`test/run-all` defaults to `1121citrus/mokerlink-backup:latest`.  `./build`
+-always sets `IMAGE` to the image it just built, so the correct image is tested
+-automatically.
+-
+-### Test stubs (`test/bin/`)
+-
+-| Stub | Replaces | Behavior |
+-| --- | --- | --- |
+-| `get-config` | `src/bin/get-config` | Emits two header lines (`! System Version: v1.2.3`, `! System Name: test-switch`) without opening an SSH connection |
+-| `aws` | AWS CLI | Copies the backup file to `/output` if that path is mounted; otherwise no-ops |
+-
+----
+-
+-## Manual integration tests (`test/staging`)
+-
+-`test/staging` exercises the full end-to-end CLI path with a real Mokerlink
+-switch and real credentials.  It is **not** part of `run-all` and is never
+-run in CI.
+-
+-Run it manually before tagging a release, from a host that can reach the
+-switch (local network or Tailscale).
+-
+-### Required environment
+-
+-| Variable | Required for | Notes |
+-|---|---|---|
+-| `IMAGE` | All tests | Image to test; defaults to `1121citrus/mokerlink-backup:latest` |
+-| `MOKERLINK_HOST` | Switch-dependent tests | Hostname or IP of the switch; omit to run only switch-independent tests |
+-| `MOKERLINK_USER` | Switch-dependent tests | SSH username; defaults to `remote-backup` |
+-| `MOKERLINK_PASSWORD` | Switch-dependent tests | Switch password; alternatively set `MOKERLINK_PASSWORD_FILE` |
+-| `MOKERLINK_PASSWORD_FILE` | Switch-dependent tests | Path to a file containing the password; read once at startup |
+-| `AWS_S3_BUCKET_NAME` | Service tests (backup, cron) | S3 bucket name; omit to skip backup and cron tests |
+-| `AWS_CONFIG_FILE` | Service tests (backup, cron) | Path to AWS config; defaults to `~/.secrets/aws-config` if readable |
+-| `AWS_ACCESS_KEY_ID` | Service tests (backup, cron) | AWS access key; use instead of config file if preferred |
+-| `AWS_SECRET_ACCESS_KEY` | Service tests (backup, cron) | AWS secret key (required with `AWS_ACCESS_KEY_ID`) |
+-| `AWS_DRYRUN` | Service tests (backup, cron) | Set to `false` for real S3 writes; defaults to `true` for non-test buckets |
+-| `STAGING_SCAN` | Staging scanner phase | `true`/`false`; controls Trivy scan (default: `true`) |
+-| `STAGING_ADVISE` | Staging scanner phase | `true`/`false`; controls Grype advisement (default: `true`) |
+-
+-### Staging scanner options
+-
+-`test/staging` also supports scanner controls:
+-
+-- `--scan` / `--no-scan`
+-- `--advise [grype,scout,dive,all]`
+-- `--no-advise`
+-
+-### Dive layer analysis (`.dive-ci`)
+-
+-When `--advise dive` (or `--advise all`) is passed, the image is analyzed by
+-[Dive](https://github.com/wagoodman/dive) in CI mode (`--ci`).  Dive reads
+-pass/fail thresholds from `.dive-ci` at the project root.  Without a config
+-file, Dive falls back to its built-in defaults, which are too strict for
+-this image.
+-
+-#### Threshold choices
+-
+-| Rule | Dive default | This project | Reason |
+-|---|---|---|---|
+-| `lowestEfficiency` | 0.9 | 0.9 | Kept at default — no change needed |
+-| `highestWastedBytes` | 20 MB | disabled | Absolute byte count is unpredictable across Alpine releases; see below |
+-| `highestUserWastedPercent` | 10% (0.1) | 20% (0.2) | `apk upgrade` creates inherent waste; see below |
+-
+-**`highestWastedBytes: disabled`**
+-
+-The `Dockerfile` runs `apk upgrade` to pull security fixes into the
+-`alpine:3.22` base layer.  Upgraded packages shadow the copies that shipped
+-in the base image; Dive counts those originals as wasted bytes because they
+-are still present in the base layer but inaccessible.  The exact byte count
+-varies with each Alpine point release (which changes what is pre-installed),
+-so a fixed byte limit would cause spurious failures on routine base-image
+-bumps.  Disabling the rule sidesteps that brittleness while `highestUserWastedPercent`
+-still provides a percentage-based safety net.
+-
+-**`highestUserWastedPercent: 0.20`**
+-
+-The default 0.10 (10%) is too tight for Alpine images that run `apk upgrade`.
+-The upgrade step replaces base-image files in the user layer, and the resulting
+-waste fraction depends on how many packages were upgraded.  0.20 (20%) provides
+-a buffer large enough to absorb expected upgrade waste while still catching
+-genuinely bloated images such as accidentally committed caches or unnecessary
+-tool installations.
+-
+-#### Config file mechanics
+-
+-`.dive-ci` lives at the project root alongside the `Dockerfile`.  When Dive
+-is invoked from `build` or `test/staging`, the file is mounted read-only into
+-the Dive container (`-v …/.dive-ci:/.dive-ci:ro`) and loaded via
+-`--ci-config /.dive-ci`.  If the file is absent, Dive uses its built-in
+-defaults.
+-
+-### Running
+-
+-```console
+-# Switch-independent tests only (help, version, option validation)
+-IMAGE=1121citrus/mokerlink-backup:1.2.3 test/staging
+-
+-# Full suite against a live switch
+-IMAGE=1121citrus/mokerlink-backup:1.2.3 \
+-  MOKERLINK_HOST=10.0.0.1 \
+-  MOKERLINK_PASSWORD=secret \
+-  test/staging
+-
+-# Using a password file
+-IMAGE=1121citrus/mokerlink-backup:1.2.3 \
+-  MOKERLINK_HOST=10.0.0.1 \
+-  MOKERLINK_PASSWORD_FILE=./secrets/mokerlink-password \
+-  test/staging
+-```
+-
+-Tests that require the switch print `SKIP` (not `FAIL`) when `MOKERLINK_HOST`
+-or a password is absent, so the script always exits cleanly in a
+-credentials-free environment.
+-
+-### AWS configuration for service tests
+-
+-Two service tests exercise the full backup pipeline and require AWS credentials:
+-- `test_staging_backup_direct` — runs the `backup` script once
+-- `test_staging_cron_fires` — starts the container and waits for cron to trigger
+-
+-To run these tests, provide:
+-1. **`AWS_S3_BUCKET_NAME`** — S3 bucket where backups will be written
+-2. **AWS credentials**, via either:
+-   - `AWS_CONFIG_FILE` — path to an AWS config file (defaults to `~/.secrets/aws-config`)
+-   - `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` — environment variables
+-
+-**Safety note:** By default, `AWS_DRYRUN=true` for buckets not matching `test.*` or `staging.*`
+-to prevent accidental production writes. Set `AWS_DRYRUN=false` explicitly to perform real S3 writes.
+-
+-Example with config file:
+-```console
+-AWS_S3_BUCKET_NAME=staging.mokerlink \
+-AWS_CONFIG_FILE=/path/to/aws-config \
+-MOKERLINK_HOST=10.0.0.1 \
+-MOKERLINK_PASSWORD=secret \
+-test/staging 1121citrus/mokerlink-backup:1.2.3
+-```
+-
+-Example with access key (skips config file lookup):
+-```console
+-AWS_S3_BUCKET_NAME=staging.mokerlink \
+-AWS_ACCESS_KEY_ID=AKIA... \
+-AWS_SECRET_ACCESS_KEY=secret \
+-MOKERLINK_HOST=10.0.0.1 \
+-MOKERLINK_PASSWORD=secret \
+-test/staging 1121citrus/mokerlink-backup:1.2.3
+-```
+-
+-When `AWS_S3_BUCKET_NAME` is unset or credentials are unavailable, service tests skip gracefully.
+-
+-### What is tested
+-
+-| Test | Switch required |
+-| --- | --- |
+-| `--help` exits 0 and prints usage | no |
+-| `--version` exits 0 and prints a non-empty string | no |
+-| Unknown option exits non-zero | no |
+-| Invalid `--format` value exits non-zero | no |
+-| All configs excluded exits non-zero | no |
+-| Default output is a valid tar with all three config files | yes |
+-| `-r` / `--running` produces tar with only the running config | yes |
+-| `-s` / `--startup` produces tar with only the startup config | yes |
+-| `-b` / `--backup` produces tar with only the backup config | yes |
+-| `--no-running` produces tar without the running config | yes |
+-| `--running --format raw` outputs text containing `! System Version:` | yes |
+-| `MOKERLINK_BACKUP_NAME_FILE` is written with a `*-config-backup.tar` filename | yes |
+diff --git a/test/backup-encryption b/test/backup-encryption
+index 2559f3a..c46b54c 100755
+--- a/test/backup-encryption
++++ b/test/backup-encryption
+@@ -13,7 +13,6 @@ setup() {
+     chmod +x "${whereami}/bin/"*
+ 
+     run_backup() {
+-        # shellcheck disable=SC2086
+         docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+             -e "PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+             -e AWS_S3_BUCKET_NAME=test-bucket \
+@@ -96,7 +95,7 @@ run_tests() {
+     echo "============================================"
+ 
+     for test in "${tests[@]}"; do
+-        if "${test}"; then (( ++passed )); fi
++        "${test}" && ((passed++)) || :
+     done
+ 
+     local failed=$(( ${#tests[@]} - passed ))
+diff --git a/test/backup-required-vars b/test/backup-required-vars
+index 93f020b..079e6b8 100755
+--- a/test/backup-required-vars
++++ b/test/backup-required-vars
+@@ -13,7 +13,6 @@ setup() {
+     chmod +x "${whereami}/bin/"*
+ 
+     run_backup() {
+-        # shellcheck disable=SC2086
+         docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+             -e "PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+             -v "${whereami}/bin:/test/bin:ro" \
+@@ -66,8 +65,8 @@ test_backup_missing_password() {
+ }
+ 
+ test_backup_tailscale_fallback() {
+-    local _output
+-    _output=$(run_backup \
++    local output
++    output=$(run_backup \
+         -e MOKERLINK_HOST= \
+         -e TAILSCALE_HOST=tailscale-host \
+         -e AWS_S3_BUCKET_NAME=test-bucket \
+@@ -81,8 +80,8 @@ test_backup_tailscale_fallback() {
+ }
+ 
+ test_backup_password_file() {
+-    local _output
+-    _output=$(run_backup \
++    local output
++    output=$(run_backup \
+         -e AWS_S3_BUCKET_NAME=test-bucket \
+         -e MOKERLINK_HOST=fake-host \
+         -e MOKERLINK_PASSWORD= \
+@@ -112,7 +111,7 @@ run_tests() {
+     echo "========================================================"
+ 
+     for test in "${tests[@]}"; do
+-        if "${test}"; then (( ++passed )); fi
++        "${test}" && ((passed++)) || :
+     done
+ 
+     local failed=$(( ${#tests[@]} - passed ))
+diff --git a/test/backup-success b/test/backup-success
+index 2daba44..06882b8 100755
+--- a/test/backup-success
++++ b/test/backup-success
+@@ -13,7 +13,6 @@ setup() {
+     chmod +x "${whereami}/bin/"*
+ 
+     run_backup() {
+-        # shellcheck disable=SC2086
+         docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+             -e "PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+             -e AWS_S3_BUCKET_NAME=test-bucket \
+@@ -85,42 +84,6 @@ test_backup_xz_contents() {
+     _assert_contains "xz extension" ".xz" "${output}"
+ }
+ 
+-test_backup_bzip3_contents() {
+-    local output
+-    output=$(run_backup -e COMPRESSION=bzip3) || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"; return 1
+-    }
+-    _assert_contains "bzip3 logged" "compressing backup with bzip3" "${output}"
+-    _assert_contains "bzip3 extension" ".bz3" "${output}"
+-}
+-
+-test_backup_lzop_contents() {
+-    local output
+-    output=$(run_backup -e COMPRESSION=lzop) || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"; return 1
+-    }
+-    _assert_contains "lzop logged" "compressing backup with lzop" "${output}"
+-    _assert_contains "lzop extension" ".lzo" "${output}"
+-}
+-
+-test_backup_pigz_contents() {
+-    local output
+-    output=$(run_backup -e COMPRESSION=pigz) || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"; return 1
+-    }
+-    _assert_contains "pigz logged" "compressing backup with pigz" "${output}"
+-    _assert_contains "pigz extension" ".pgz" "${output}"
+-}
+-
+-test_backup_pixz_contents() {
+-    local output
+-    output=$(run_backup -e COMPRESSION=pixz) || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"; return 1
+-    }
+-    _assert_contains "pixz logged" "compressing backup with pixz" "${output}"
+-    _assert_contains "pixz extension" ".pxz" "${output}"
+-}
+-
+ test_backup_invalid_compression() {
+     run_backup -e COMPRESSION=invalid > /dev/null && result=0 || result=$?
+     if [[ ${result} -ne 0 ]]; then
+@@ -167,11 +130,7 @@ run_tests() {
+         test_backup_no_compression
+         test_backup_zip_contents
+         test_backup_bzip2_contents
+-        test_backup_bzip3_contents
+         test_backup_gzip_contents
+-        test_backup_lzop_contents
+-        test_backup_pigz_contents
+-        test_backup_pixz_contents
+         test_backup_xz_contents
+         test_backup_invalid_compression
+         test_backup_archive_contains_configs
+@@ -183,7 +142,7 @@ run_tests() {
+     echo "=========================================="
+ 
+     for test in "${tests[@]}"; do
+-        if "${test}"; then (( ++passed )); fi
++        "${test}" && ((passed++)) || :
+     done
+ 
+     local failed=$(( ${#tests[@]} - passed ))
+diff --git a/test/bin/get-config b/test/bin/get-config
+index b5ea3ef..eac06e4 100755
+--- a/test/bin/get-config
++++ b/test/bin/get-config
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env bash
+ 
+ # Stub get-config for tests.
+-_config=$1
++config=$1
+ shift
+ cat <<'EOF'
+ ! System Version: v1.2.3
+diff --git a/test/build-options b/test/build-options
+deleted file mode 100755
+index b55bade..0000000
+--- a/test/build-options
++++ /dev/null
+@@ -1,35 +0,0 @@
+-#!/usr/bin/env bash
+-
+-set -euo pipefail
+-
+-repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+-build_script="${repo_root}/build"
+-staging_script="${repo_root}/test/staging"
+-
+-fail() {
+-    echo "[FAIL] $*" >&2
+-    exit 1
+-}
+-
+-contains() {
+-    local haystack="$1"
+-    local needle="$2"
+-    [[ "${haystack}" == *"${needle}"* ]]
+-}
+-
+-help_out=$("${build_script}" --help 2>&1)
+-contains "${help_out}" "--advice" || fail "build --help missing --advice"
+-contains "${help_out}" "--cache CACHE_RULES" || fail "build --help missing --cache"
+-
+-adv_out=$("${build_script}" --advice scout --dry-run --no-lint --no-test --no-scan 2>&1)
+-contains "${adv_out}" "Stage 5b: Advise (Scout)" || fail "--advice scout did not enable Scout advisement"
+-
+-cache_out=$("${build_script}" --cache "reset=all" --dry-run --no-lint --no-test --no-scan --no-advise 2>&1)
+-contains "${cache_out}" "Cache: reset Trivy DB" || fail "--cache reset=all missing Trivy reset"
+-contains "${cache_out}" "Cache: reset Grype DB" || fail "--cache reset=all missing Grype reset"
+-
+-staging_help=$("${staging_script}" --help 2>&1)
+-contains "${staging_help}" "--scan" || fail "test/staging --help missing --scan"
+-contains "${staging_help}" "--advise" || fail "test/staging --help missing --advise"
+-
+-echo "[PASS] build and staging option coverage"
+diff --git a/test/healthcheck b/test/healthcheck
+index a50991a..dcde2d1 100755
+--- a/test/healthcheck
++++ b/test/healthcheck
+@@ -13,7 +13,6 @@ setup() {
+ 
+     run_healthcheck() {
+         local script=$1; shift
+-        # shellcheck disable=SC2086
+         docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+             --entrypoint /usr/bin/env \
+             -v "${whereami}/bin/get-config:/usr/local/bin/get-config:ro" \
+@@ -42,7 +41,6 @@ test_healthcheck_healthy_with_crond() {
+     local script
+     script='mkdir -p /var/spool/cron/crontabs'
+     script+=' && printf "%s\n" "* * * * * /usr/local/bin/backup 2>&1" > /var/spool/cron/crontabs/root'
+-    script+=' && chmod 0600 /var/spool/cron/crontabs/root'
+     script+=' && crond -l 2 && sleep 0.5'
+     script+=' && /usr/local/bin/healthcheck'
+     run_healthcheck "${script}" && result=0 || result=$?
+@@ -80,7 +78,7 @@ run_tests() {
+     echo "================================="
+ 
+     for test in "${tests[@]}"; do
+-        if "${test}"; then (( ++passed )); fi
++        "${test}" && ((passed++)) || :
+     done
+ 
+     local failed=$(( ${#tests[@]} - passed ))
+diff --git a/test/mokerlink-backup b/test/mokerlink-backup
+deleted file mode 100755
+index 98a8690..0000000
+--- a/test/mokerlink-backup
++++ /dev/null
+@@ -1,436 +0,0 @@
+-#!/usr/bin/env bash
+-
+-# mokerlink-backup: test src/bin/mokerlink-backup directly.
+-#
+-# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+-# SPDX-License-Identifier: AGPL-3.0-or-later
+-
+-set -euo pipefail
+-
+-setup() {
+-    whereami=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+-    IMAGE=${IMAGE:-1121citrus/mokerlink-backup:latest}
+-    chmod +x "${whereami}/bin/"*
+-
+-    # Run mokerlink-backup with extra docker flags before the image name.
+-    # Positional args after IMAGE are passed as command arguments.
+-    run_mokerlink_backup() {
+-        # shellcheck disable=SC2086
+-        docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+-            -e "PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+-            -e MOKERLINK_HOST=fake-host \
+-            -e MOKERLINK_PASSWORD=testpass \
+-            -v "${whereami}/bin:/test/bin:ro" \
+-            -v "${whereami}/bin/get-config:/usr/local/bin/get-config:ro" \
+-            "$@" \
+-            "${IMAGE}" /usr/local/bin/mokerlink-backup 2>/dev/null
+-    }
+-
+-    # Run mokerlink-backup passing CLI arguments to the command (not to docker).
+-    run_mokerlink_backup_args() {
+-        local cmd_args=("$@")
+-        # shellcheck disable=SC2086
+-        docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+-            -e "PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+-            -e MOKERLINK_HOST=fake-host \
+-            -e MOKERLINK_PASSWORD=testpass \
+-            -v "${whereami}/bin:/test/bin:ro" \
+-            -v "${whereami}/bin/get-config:/usr/local/bin/get-config:ro" \
+-            "${IMAGE}" /usr/local/bin/mokerlink-backup "${cmd_args[@]}" 2>/dev/null
+-    }
+-
+-    export -f run_mokerlink_backup
+-    export -f run_mokerlink_backup_args
+-}
+-
+-# ── Existing env-var tests (backward-compatibility) ──────────────────────────
+-
+-test_mokerlink_backup_missing_host() {
+-    run_mokerlink_backup -e MOKERLINK_HOST= -e TAILSCALE_HOST= > /dev/null \
+-        && result=0 || result=$?
+-    if [[ ${result} -ne 0 ]]; then
+-        echo "PASS '${FUNCNAME[0]}': exits non-zero when neither MOKERLINK_HOST nor TAILSCALE_HOST is set"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero"
+-        return 1
+-    fi
+-}
+-
+-test_mokerlink_backup_tailscale_fallback() {
+-    run_mokerlink_backup -e MOKERLINK_HOST= -e TAILSCALE_HOST=tailscale-host > /dev/null \
+-        && result=0 || result=$?
+-    if [[ ${result} -eq 0 ]]; then
+-        echo "PASS '${FUNCNAME[0]}': TAILSCALE_HOST accepted when MOKERLINK_HOST is unset"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': should have succeeded with TAILSCALE_HOST set"
+-        return 1
+-    fi
+-}
+-
+-test_mokerlink_backup_missing_password() {
+-    run_mokerlink_backup \
+-        -e MOKERLINK_PASSWORD= \
+-        -e MOKERLINK_PASSWORD_FILE=/nonexistent \
+-        > /dev/null && result=0 || result=$?
+-    if [[ ${result} -ne 0 ]]; then
+-        echo "PASS '${FUNCNAME[0]}': exits non-zero when no password is available"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero"
+-        return 1
+-    fi
+-}
+-
+-test_mokerlink_backup_streams_tar() {
+-    if run_mokerlink_backup | tar -t > /dev/null; then
+-        echo "PASS '${FUNCNAME[0]}': stdout is a valid tar archive"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': stdout is not a valid tar archive"
+-        return 1
+-    fi
+-}
+-
+-test_mokerlink_backup_name_file() {
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup \
+-        -e MOKERLINK_BACKUP_NAME_FILE=/name/result \
+-        -v "${tmpdir}:/name" > /dev/null || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"
+-        return 1
+-    }
+-    local name
+-    name=$(cat "${tmpdir}/result" 2>/dev/null) || {
+-        echo "FAIL '${FUNCNAME[0]}': name file not written"
+-        rm -rf "${tmpdir}"
+-        return 1
+-    }
+-    rm -rf "${tmpdir}"
+-    if [[ "${name}" == *"-config-backup.tar" ]]; then
+-        echo "PASS '${FUNCNAME[0]}': name file contains expected tar filename: ${name}"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': unexpected name file contents: '${name}'"
+-        return 1
+-    fi
+-}
+-
+-test_mokerlink_backup_archive_contents() {
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup > "${tmpdir}/out.tar" || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"
+-        return 1
+-    }
+-    local contents
+-    contents=$(tar -tf "${tmpdir}/out.tar")
+-    rm -rf "${tmpdir}"
+-    local pass=true
+-    for config in running startup backup; do
+-        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+-            echo "PASS '${FUNCNAME[0]}': archive contains ${config}-config-backup.xml"
+-        else
+-            echo "FAIL '${FUNCNAME[0]}': archive missing ${config}-config-backup.xml"
+-            pass=false
+-        fi
+-    done
+-    ${pass}
+-}
+-
+-# ── New CLI flag tests ────────────────────────────────────────────────────────
+-
+-test_mokerlink_backup_help_flag() {
+-    local output
+-    output=$(run_mokerlink_backup_args --help 2>&1) && result=0 || result=$?
+-    if [[ ${result} -eq 0 ]] && echo "${output}" | grep -q 'Usage:'; then
+-        echo "PASS '${FUNCNAME[0]}': --help exits 0 and prints usage"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': --help did not exit 0 or missing usage text (exit=${result})"
+-        return 1
+-    fi
+-}
+-
+-test_mokerlink_backup_version_flag() {
+-    run_mokerlink_backup_args --version > /dev/null && result=0 || result=$?
+-    if [[ ${result} -eq 0 ]]; then
+-        echo "PASS '${FUNCNAME[0]}': --version exits 0"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': --version should exit 0 (got ${result})"
+-        return 1
+-    fi
+-}
+-
+-test_mokerlink_backup_host_flag() {
+-    run_mokerlink_backup_args -H flag-host > /dev/null \
+-        && result=0 || result=$?
+-    if [[ ${result} -eq 0 ]]; then
+-        echo "PASS '${FUNCNAME[0]}': -H flag accepted as host"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': -H flag should have worked (got ${result})"
+-        return 1
+-    fi
+-}
+-
+-test_mokerlink_backup_running_only() {
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup_args --running > "${tmpdir}/out.tar" || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"
+-        return 1
+-    }
+-    local contents
+-    contents=$(tar -tf "${tmpdir}/out.tar")
+-    rm -rf "${tmpdir}"
+-    local pass=true
+-    if echo "${contents}" | grep -q 'running-config-backup.xml'; then
+-        echo "PASS '${FUNCNAME[0]}': archive contains running-config-backup.xml"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': archive missing running-config-backup.xml"
+-        pass=false
+-    fi
+-    for config in startup backup; do
+-        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+-            echo "FAIL '${FUNCNAME[0]}': archive should not contain ${config}-config-backup.xml"
+-            pass=false
+-        else
+-            echo "PASS '${FUNCNAME[0]}': archive correctly excludes ${config}-config-backup.xml"
+-        fi
+-    done
+-    ${pass}
+-}
+-
+-test_mokerlink_backup_startup_only() {
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup_args --startup > "${tmpdir}/out.tar" || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"
+-        return 1
+-    }
+-    local contents
+-    contents=$(tar -tf "${tmpdir}/out.tar")
+-    rm -rf "${tmpdir}"
+-    local pass=true
+-    if echo "${contents}" | grep -q 'startup-config-backup.xml'; then
+-        echo "PASS '${FUNCNAME[0]}': archive contains startup-config-backup.xml"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': archive missing startup-config-backup.xml"
+-        pass=false
+-    fi
+-    for config in running backup; do
+-        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+-            echo "FAIL '${FUNCNAME[0]}': archive should not contain ${config}-config-backup.xml"
+-            pass=false
+-        else
+-            echo "PASS '${FUNCNAME[0]}': archive correctly excludes ${config}-config-backup.xml"
+-        fi
+-    done
+-    ${pass}
+-}
+-
+-test_mokerlink_backup_backup_only() {
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup_args --backup > "${tmpdir}/out.tar" || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"
+-        return 1
+-    }
+-    local contents
+-    contents=$(tar -tf "${tmpdir}/out.tar")
+-    rm -rf "${tmpdir}"
+-    local pass=true
+-    if echo "${contents}" | grep -q 'backup-config-backup.xml'; then
+-        echo "PASS '${FUNCNAME[0]}': archive contains backup-config-backup.xml"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': archive missing backup-config-backup.xml"
+-        pass=false
+-    fi
+-    for config in running startup; do
+-        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+-            echo "FAIL '${FUNCNAME[0]}': archive should not contain ${config}-config-backup.xml"
+-            pass=false
+-        else
+-            echo "PASS '${FUNCNAME[0]}': archive correctly excludes ${config}-config-backup.xml"
+-        fi
+-    done
+-    ${pass}
+-}
+-
+-test_mokerlink_backup_no_running_excludes() {
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup_args --no-running > "${tmpdir}/out.tar" || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"
+-        return 1
+-    }
+-    local contents
+-    contents=$(tar -tf "${tmpdir}/out.tar")
+-    rm -rf "${tmpdir}"
+-    local pass=true
+-    if echo "${contents}" | grep -q 'running-config-backup.xml'; then
+-        echo "FAIL '${FUNCNAME[0]}': archive should not contain running-config-backup.xml"
+-        pass=false
+-    else
+-        echo "PASS '${FUNCNAME[0]}': --no-running correctly excludes running config"
+-    fi
+-    for config in startup backup; do
+-        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+-            echo "PASS '${FUNCNAME[0]}': archive contains ${config}-config-backup.xml"
+-        else
+-            echo "FAIL '${FUNCNAME[0]}': archive missing ${config}-config-backup.xml"
+-            pass=false
+-        fi
+-    done
+-    ${pass}
+-}
+-
+-test_mokerlink_backup_no_startup_excludes() {
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup_args --no-startup > "${tmpdir}/out.tar" || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"
+-        return 1
+-    }
+-    local contents
+-    contents=$(tar -tf "${tmpdir}/out.tar")
+-    rm -rf "${tmpdir}"
+-    local pass=true
+-    if echo "${contents}" | grep -q 'startup-config-backup.xml'; then
+-        echo "FAIL '${FUNCNAME[0]}': archive should not contain startup-config-backup.xml"
+-        pass=false
+-    else
+-        echo "PASS '${FUNCNAME[0]}': --no-startup correctly excludes startup config"
+-    fi
+-    for config in running backup; do
+-        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+-            echo "PASS '${FUNCNAME[0]}': archive contains ${config}-config-backup.xml"
+-        else
+-            echo "FAIL '${FUNCNAME[0]}': archive missing ${config}-config-backup.xml"
+-            pass=false
+-        fi
+-    done
+-    ${pass}
+-}
+-
+-test_mokerlink_backup_no_backup_excludes() {
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup_args --no-backup > "${tmpdir}/out.tar" || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"
+-        return 1
+-    }
+-    local contents
+-    contents=$(tar -tf "${tmpdir}/out.tar")
+-    rm -rf "${tmpdir}"
+-    local pass=true
+-    if echo "${contents}" | grep -q 'backup-config-backup.xml'; then
+-        echo "FAIL '${FUNCNAME[0]}': archive should not contain backup-config-backup.xml"
+-        pass=false
+-    else
+-        echo "PASS '${FUNCNAME[0]}': --no-backup correctly excludes backup config"
+-    fi
+-    for config in running startup; do
+-        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+-            echo "PASS '${FUNCNAME[0]}': archive contains ${config}-config-backup.xml"
+-        else
+-            echo "FAIL '${FUNCNAME[0]}': archive missing ${config}-config-backup.xml"
+-            pass=false
+-        fi
+-    done
+-    ${pass}
+-}
+-
+-test_mokerlink_backup_format_raw() {
+-    local output
+-    output=$(run_mokerlink_backup_args --running --format raw) && result=0 || result=$?
+-    if [[ ${result} -ne 0 ]]; then
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero (${result})"
+-        return 1
+-    fi
+-    # Raw output should contain config text, not be a tar archive
+-    if echo "${output}" | grep -q 'System Version:'; then
+-        echo "PASS '${FUNCNAME[0]}': --format raw outputs config text"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': --format raw did not output config text"
+-        return 1
+-    fi
+-}
+-
+-test_mokerlink_backup_format_invalid() {
+-    run_mokerlink_backup_args --format badformat > /dev/null 2>&1 \
+-        && result=0 || result=$?
+-    if [[ ${result} -ne 0 ]]; then
+-        echo "PASS '${FUNCNAME[0]}': exits non-zero for unknown --format value"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero for unknown --format"
+-        return 1
+-    fi
+-}
+-
+-test_mokerlink_backup_unknown_option() {
+-    run_mokerlink_backup_args --no-such-option > /dev/null 2>&1 \
+-        && result=0 || result=$?
+-    if [[ ${result} -ne 0 ]]; then
+-        echo "PASS '${FUNCNAME[0]}': exits non-zero for unknown option"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero for unknown option"
+-        return 1
+-    fi
+-}
+-
+-test_mokerlink_backup_all_excluded() {
+-    run_mokerlink_backup_args --no-running --no-startup --no-backup > /dev/null 2>&1 \
+-        && result=0 || result=$?
+-    if [[ ${result} -ne 0 ]]; then
+-        echo "PASS '${FUNCNAME[0]}': exits non-zero when all configs excluded"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero when all excluded"
+-        return 1
+-    fi
+-}
+-
+-run_tests() {
+-    local passed=0
+-    local tests=(
+-        test_mokerlink_backup_missing_host
+-        test_mokerlink_backup_tailscale_fallback
+-        test_mokerlink_backup_missing_password
+-        test_mokerlink_backup_streams_tar
+-        test_mokerlink_backup_name_file
+-        test_mokerlink_backup_archive_contents
+-        test_mokerlink_backup_help_flag
+-        test_mokerlink_backup_version_flag
+-        test_mokerlink_backup_host_flag
+-        test_mokerlink_backup_running_only
+-        test_mokerlink_backup_startup_only
+-        test_mokerlink_backup_backup_only
+-        test_mokerlink_backup_no_running_excludes
+-        test_mokerlink_backup_no_startup_excludes
+-        test_mokerlink_backup_no_backup_excludes
+-        test_mokerlink_backup_format_raw
+-        test_mokerlink_backup_format_invalid
+-        test_mokerlink_backup_unknown_option
+-        test_mokerlink_backup_all_excluded
+-    )
+-
+-    setup || { echo "ERROR: Setup failed"; return 1; }
+-
+-    echo "Running tests for mokerlink-backup..."
+-    echo "======================================"
+-
+-    for test in "${tests[@]}"; do
+-        if "${test}"; then (( ++passed )); fi
+-    done
+-
+-    local failed=$(( ${#tests[@]} - passed ))
+-    echo "======================================"
+-    echo "Results: ${passed} passed, ${failed} failed"
+-    return "${failed}"
+-}
+-
+-[[ "${BASH_SOURCE[0]}" == "$0" ]] && run_tests
+diff --git a/test/run-all b/test/run-all
+index bb96e12..561a40c 100755
+--- a/test/run-all
++++ b/test/run-all
+@@ -10,8 +10,6 @@ set -euo pipefail
+ whereami=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+ 
+ status=0
+-"${whereami}/build-options"         || status=1
+-"${whereami}/mokerlink-backup"      || status=1
+ "${whereami}/backup-required-vars"  || status=1
+ "${whereami}/backup-success"        || status=1
+ "${whereami}/backup-encryption"     || status=1
+diff --git a/test/staging b/test/staging
+deleted file mode 100755
+index d1d3617..0000000
+--- a/test/staging
++++ /dev/null
+@@ -1,745 +0,0 @@
+-#!/usr/bin/env bash
+-
+-# mokerlink-backup: functional tests against a real Mokerlink switch.
+-#
+-# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+-# SPDX-License-Identifier: AGPL-3.0-or-later
+-#
+-# These tests exercise the mokerlink-backup CLI end-to-end with no stubs.
+-# Tests that require a live switch are skipped (not failed) when
+-# MOKERLINK_HOST is unset or credentials are unavailable.
+-#
+-# Required environment (switch-dependent tests):
+-#   MOKERLINK_HOST          hostname or IP of the Mokerlink switch
+-#   MOKERLINK_USER          SSH username (default: remote-backup)
+-#   MOKERLINK_PASSWORD      switch password, OR
+-#   MOKERLINK_PASSWORD_FILE path to a file containing the password
+-#
+-# Usage:
+-#   test/staging [options] [image]
+-#   IMAGE=1121citrus/mokerlink-backup:1.2.3 test/staging
+-#   test/staging --no-scan 1121citrus/mokerlink-backup:1.2.3
+-#   MOKERLINK_HOST=10.0.0.1 MOKERLINK_PASSWORD=secret test/staging <image>
+-#
+-# Options:
+-#   --image IMAGE        Docker image under test
+-#   --scan               Run Trivy scan (default)
+-#   --no-scan            Skip Trivy scan; implies --no-advise unless --advise is set
+-#   --advise [LIST]      Run advisory scans: grype,scout,dive,all (default: grype,scout)
+-#   --no-advise          Disable advisory scans
+-#   --yes                Skip interactive confirmation
+-#   --help|-h            Show this help and exit
+-
+-set -euo pipefail
+-
+-_SCAN="${STAGING_SCAN:-true}"
+-_ADVISE_GRYPE="${STAGING_ADVISE:-true}"
+-_ADVISE_SCOUT=true
+-_ADVISE_DIVE=false
+-_ADVISE_EXPLICIT=false
+-_YES=false
+-
+-TRIVY_IMAGE=aquasec/trivy
+-TRIVY_TAG=0.62.1
+-GRYPE_IMAGE=anchore/grype
+-GRYPE_TAG=v0.87.0
+-DIVE_IMAGE=wagoodman/dive
+-DIVE_TAG=v0.13.1
+-
+-TRIVY_CACHE_VOLUME=mokerlink-backup-staging-trivy-cache
+-GRYPE_CACHE_VOLUME=mokerlink-backup-staging-grype-cache
+-
+-show_help() {
+-    sed -n '/^# Usage:/,/^set -/p' "$0" \
+-        | grep '^#' \
+-        | sed 's/^# \{0,1\}//'
+-}
+-
+-setup() {
+-    # $1 overrides the IMAGE env var; neither has a default.
+-    IMAGE="${1:-${IMAGE:-}}"
+-    [[ -n "${IMAGE}" ]] || {
+-        echo "ERROR: IMAGE is not set" >&2
+-        echo "       Usage: test/staging <image>  or  IMAGE=<image> test/staging" >&2
+-        return 1
+-    }
+-    docker image inspect "${IMAGE}" > /dev/null 2>&1 || {
+-        echo "ERROR: image not found locally: ${IMAGE}" >&2
+-        echo "       Pull or build it first: ./build --no-scan" >&2
+-        return 1
+-    }
+-
+-    # Resolve password once so each test does not re-read the file.
+-    local pw_file="${MOKERLINK_PASSWORD_FILE:-"${HOME}/.secrets/mokerlink-password"}"
+-    if [[ -n "${MOKERLINK_PASSWORD:-}" ]]; then
+-        switch_password="${MOKERLINK_PASSWORD}"
+-    elif [[ -r "${pw_file}" ]]; then
+-        switch_password=$(cat "${pw_file}")
+-    else
+-        switch_password=
+-    fi
+-
+-    # Run mokerlink-backup with staging credentials and the given CLI args.
+-    # No stubs: the real get-config and real switch are used.
+-    run_mokerlink_backup() {
+-        # shellcheck disable=SC2086
+-        docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+-            -e "MOKERLINK_HOST=${MOKERLINK_HOST:-}" \
+-            -e "MOKERLINK_USER=${MOKERLINK_USER:-remote-backup}" \
+-            -e "MOKERLINK_PASSWORD=${switch_password}" \
+-            "${IMAGE}" /usr/local/bin/mokerlink-backup "$@" 2>/dev/null
+-    }
+-
+-    # Verify the image contains the command before any test runs.
+-    # Exit 127 from individual tests is confusing; a clear setup failure
+-    # is not.  This catches a stale 'latest' image before publishing a new
+-    # version — rebuild with: IMAGE=... ./build --no-scan
+-    if ! docker run --rm "${IMAGE}" \
+-            test -x /usr/local/bin/mokerlink-backup > /dev/null 2>&1; then
+-        echo "ERROR: /usr/local/bin/mokerlink-backup not found in ${IMAGE}" >&2
+-        echo "       Rebuild: ./build --no-scan" >&2
+-        return 1
+-    fi
+-
+-    # Run the legacy backup script directly with staging credentials.
+-    # stderr is merged with stdout so callers capture all log output.
+-    # shellcheck disable=SC2120  # "$@" is intentional: callers may pass extra docker flags
+-    run_backup() {
+-        local aws_mounts=()
+-        [[ -r "${AWS_CONFIG_FILE:-}" ]] && \
+-            aws_mounts+=(-v "${AWS_CONFIG_FILE}:/run/secrets/aws-config:ro")
+-        # shellcheck disable=SC2086
+-        docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+-            -e "MOKERLINK_HOST=${MOKERLINK_HOST:-}" \
+-            -e "MOKERLINK_USER=${MOKERLINK_USER:-remote-backup}" \
+-            -e "MOKERLINK_PASSWORD=${switch_password}" \
+-            -e "AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME:-}" \
+-            -e "AWS_DRYRUN=${AWS_DRYRUN:-false}" \
+-            -e "COMPRESSION=${COMPRESSION:-none}" \
+-            "${aws_mounts[@]}" \
+-            "$@" \
+-            "${IMAGE}" /usr/local/bin/backup 2>&1
+-    }
+-
+-    # Start the full service container (startup → crond → backup) detached.
+-    # Prints the container ID to stdout; caller is responsible for stop and rm.
+-    run_service_detached() {
+-        local aws_mounts=()
+-        [[ -r "${AWS_CONFIG_FILE:-}" ]] && \
+-            aws_mounts+=(-v "${AWS_CONFIG_FILE}:/run/secrets/aws-config:ro")
+-        # shellcheck disable=SC2086
+-        docker run -d ${DOCKER_RUN_ARGS:-} \
+-            -e "MOKERLINK_HOST=${MOKERLINK_HOST:-}" \
+-            -e "MOKERLINK_USER=${MOKERLINK_USER:-remote-backup}" \
+-            -e "MOKERLINK_PASSWORD=${switch_password}" \
+-            -e "AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME:-}" \
+-            -e "AWS_DRYRUN=${AWS_DRYRUN:-false}" \
+-            -e "COMPRESSION=${COMPRESSION:-none}" \
+-            "${aws_mounts[@]}" \
+-            "$@" \
+-            "${IMAGE}"
+-    }
+-
+-    export switch_password
+-    export -f run_mokerlink_backup run_backup run_service_detached
+-}
+-
+-# _skip prints a SKIP notice and returns 0 so the test is not counted as failed.
+-_skip() {
+-    echo "SKIP '${FUNCNAME[1]}': $*"
+-}
+-
+-# _switch_available returns 0 when MOKERLINK_HOST and a password are present.
+-_switch_available() {
+-    [[ -n "${MOKERLINK_HOST:-}" ]] && [[ -n "${switch_password:-}" ]]
+-}
+-
+-# _aws_available returns 0 when AWS_S3_BUCKET_NAME is set and at least one
+-# form of AWS credentials is present (config file or access-key env vars).
+-_aws_available() {
+-    [[ -n "${AWS_S3_BUCKET_NAME:-}" ]] && {
+-        [[ -r "${AWS_CONFIG_FILE:-/run/secrets/aws-config}" ]] || \
+-        [[ -n "${AWS_ACCESS_KEY_ID:-}" ]]
+-    }
+-}
+-
+-# _service_available returns 0 when both switch and AWS are configured.
+-_service_available() {
+-    _switch_available && _aws_available
+-}
+-
+-# ── Switch-independent tests ──────────────────────────────────────────────────
+-# These exercise CLI option parsing only; no switch connection is attempted.
+-
+-test_staging_help() {
+-    local output
+-    output=$(run_mokerlink_backup --help 2>&1) && result=0 || result=$?
+-    if [[ ${result} -eq 0 ]] && echo "${output}" | grep -q 'Usage:'; then
+-        echo "PASS '${FUNCNAME[0]}': --help exits 0 and prints usage"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': --help failed (exit=${result})"
+-        return 1
+-    fi
+-}
+-
+-test_staging_version() {
+-    local output
+-    output=$(run_mokerlink_backup --version 2>&1) && result=0 || result=$?
+-    if [[ ${result} -eq 0 ]] && [[ -n "${output}" ]]; then
+-        echo "PASS '${FUNCNAME[0]}': --version exits 0 and prints: ${output}"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': --version failed (exit=${result})"
+-        return 1
+-    fi
+-}
+-
+-test_staging_unknown_option() {
+-    run_mokerlink_backup --no-such-option > /dev/null 2>&1 \
+-        && result=0 || result=$?
+-    if [[ ${result} -ne 0 ]]; then
+-        echo "PASS '${FUNCNAME[0]}': exits non-zero for unknown option"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero"
+-        return 1
+-    fi
+-}
+-
+-test_staging_format_invalid() {
+-    run_mokerlink_backup --format badformat > /dev/null 2>&1 \
+-        && result=0 || result=$?
+-    if [[ ${result} -ne 0 ]]; then
+-        echo "PASS '${FUNCNAME[0]}': exits non-zero for invalid --format value"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero"
+-        return 1
+-    fi
+-}
+-
+-test_staging_all_excluded() {
+-    run_mokerlink_backup --no-running --no-startup --no-backup > /dev/null 2>&1 \
+-        && result=0 || result=$?
+-    if [[ ${result} -ne 0 ]]; then
+-        echo "PASS '${FUNCNAME[0]}': exits non-zero when all configs excluded"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero"
+-        return 1
+-    fi
+-}
+-
+-# ── Switch-dependent tests ────────────────────────────────────────────────────
+-# Each test skips when MOKERLINK_HOST or a password is absent.
+-
+-test_staging_default_tar() {
+-    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup > "${tmpdir}/out.tar" || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"; return 1
+-    }
+-    if ! tar -tf "${tmpdir}/out.tar" > /dev/null 2>&1; then
+-        echo "FAIL '${FUNCNAME[0]}': output is not a valid tar archive"
+-        rm -rf "${tmpdir}"; return 1
+-    fi
+-    local contents pass=true
+-    contents=$(tar -tf "${tmpdir}/out.tar")
+-    rm -rf "${tmpdir}"
+-    for config in running startup backup; do
+-        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+-            echo "PASS '${FUNCNAME[0]}': archive contains ${config}-config-backup.xml"
+-        else
+-            echo "FAIL '${FUNCNAME[0]}': archive missing ${config}-config-backup.xml"
+-            pass=false
+-        fi
+-    done
+-    ${pass}
+-}
+-
+-test_staging_running_only() {
+-    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup --running > "${tmpdir}/out.tar" || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"; return 1
+-    }
+-    local contents pass=true
+-    contents=$(tar -tf "${tmpdir}/out.tar")
+-    rm -rf "${tmpdir}"
+-    if echo "${contents}" | grep -q 'running-config-backup.xml'; then
+-        echo "PASS '${FUNCNAME[0]}': archive contains running-config-backup.xml"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': archive missing running-config-backup.xml"
+-        pass=false
+-    fi
+-    for config in startup backup; do
+-        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+-            echo "FAIL '${FUNCNAME[0]}': archive should not contain ${config}-config-backup.xml"
+-            pass=false
+-        else
+-            echo "PASS '${FUNCNAME[0]}': archive correctly excludes ${config}-config-backup.xml"
+-        fi
+-    done
+-    ${pass}
+-}
+-
+-test_staging_startup_only() {
+-    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup --startup > "${tmpdir}/out.tar" || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"; return 1
+-    }
+-    local contents pass=true
+-    contents=$(tar -tf "${tmpdir}/out.tar")
+-    rm -rf "${tmpdir}"
+-    if echo "${contents}" | grep -q 'startup-config-backup.xml'; then
+-        echo "PASS '${FUNCNAME[0]}': archive contains startup-config-backup.xml"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': archive missing startup-config-backup.xml"
+-        pass=false
+-    fi
+-    for config in running backup; do
+-        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+-            echo "FAIL '${FUNCNAME[0]}': archive should not contain ${config}-config-backup.xml"
+-            pass=false
+-        else
+-            echo "PASS '${FUNCNAME[0]}': archive correctly excludes ${config}-config-backup.xml"
+-        fi
+-    done
+-    ${pass}
+-}
+-
+-test_staging_backup_only() {
+-    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup --backup > "${tmpdir}/out.tar" || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"; return 1
+-    }
+-    local contents pass=true
+-    contents=$(tar -tf "${tmpdir}/out.tar")
+-    rm -rf "${tmpdir}"
+-    if echo "${contents}" | grep -q 'backup-config-backup.xml'; then
+-        echo "PASS '${FUNCNAME[0]}': archive contains backup-config-backup.xml"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': archive missing backup-config-backup.xml"
+-        pass=false
+-    fi
+-    for config in running startup; do
+-        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+-            echo "FAIL '${FUNCNAME[0]}': archive should not contain ${config}-config-backup.xml"
+-            pass=false
+-        else
+-            echo "PASS '${FUNCNAME[0]}': archive correctly excludes ${config}-config-backup.xml"
+-        fi
+-    done
+-    ${pass}
+-}
+-
+-test_staging_no_running() {
+-    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    run_mokerlink_backup --no-running > "${tmpdir}/out.tar" || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"; return 1
+-    }
+-    local contents pass=true
+-    contents=$(tar -tf "${tmpdir}/out.tar")
+-    rm -rf "${tmpdir}"
+-    if echo "${contents}" | grep -q 'running-config-backup.xml'; then
+-        echo "FAIL '${FUNCNAME[0]}': archive should not contain running-config-backup.xml"
+-        pass=false
+-    else
+-        echo "PASS '${FUNCNAME[0]}': --no-running correctly excludes running config"
+-    fi
+-    for config in startup backup; do
+-        if echo "${contents}" | grep -q "${config}-config-backup.xml"; then
+-            echo "PASS '${FUNCNAME[0]}': archive contains ${config}-config-backup.xml"
+-        else
+-            echo "FAIL '${FUNCNAME[0]}': archive missing ${config}-config-backup.xml"
+-            pass=false
+-        fi
+-    done
+-    ${pass}
+-}
+-
+-test_staging_format_raw() {
+-    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+-    local output
+-    output=$(run_mokerlink_backup --running --format raw) && result=0 || result=$?
+-    if [[ ${result} -ne 0 ]]; then
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero (${result})"
+-        return 1
+-    fi
+-    # Real Mokerlink firmware marks config blocks with '! System Version:'
+-    if echo "${output}" | grep -q '! System Version:'; then
+-        echo "PASS '${FUNCNAME[0]}': --format raw outputs config text with version marker"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': --format raw output missing '! System Version:' marker"
+-        return 1
+-    fi
+-}
+-
+-test_staging_name_file() {
+-    _switch_available || { _skip "MOKERLINK_HOST or password not set"; return 0; }
+-    local tmpdir
+-    tmpdir=$(mktemp -d)
+-    # shellcheck disable=SC2086
+-    docker run -i --rm ${DOCKER_RUN_ARGS:-} \
+-        -e "MOKERLINK_HOST=${MOKERLINK_HOST:-}" \
+-        -e "MOKERLINK_USER=${MOKERLINK_USER:-remote-backup}" \
+-        -e "MOKERLINK_PASSWORD=${switch_password}" \
+-        -e "MOKERLINK_BACKUP_NAME_FILE=/name/result" \
+-        -v "${tmpdir}:/name" \
+-        "${IMAGE}" /usr/local/bin/mokerlink-backup > /dev/null 2>/dev/null || {
+-        echo "FAIL '${FUNCNAME[0]}': command exited non-zero"
+-        rm -rf "${tmpdir}"; return 1
+-    }
+-    local name
+-    name=$(cat "${tmpdir}/result" 2>/dev/null) || {
+-        echo "FAIL '${FUNCNAME[0]}': name file not written to ${tmpdir}/result"
+-        rm -rf "${tmpdir}"; return 1
+-    }
+-    rm -rf "${tmpdir}"
+-    if [[ "${name}" == *"-config-backup.tar" ]]; then
+-        echo "PASS '${FUNCNAME[0]}': name file contains expected tar filename: ${name}"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': unexpected name file contents: '${name}'"
+-        return 1
+-    fi
+-}
+-
+-# ── Cron / service-mode tests ─────────────────────────────────────────────────
+-# Both tests require switch access AND AWS credentials.
+-# Set AWS_DRYRUN=true to exercise the full pipeline without real S3 writes.
+-
+-# test_staging_backup_direct: run the `backup` script once, directly.
+-# Verifies the full mokerlink-backup → compress → (encrypt) → S3 pipeline.
+-# Expected duration: 30–90 s depending on switch response and compression.
+-test_staging_backup_direct() {
+-    _service_available || { _skip "switch or AWS not configured"; return 0; }
+-
+-    printf '  starting backup (AWS_DRYRUN=%s; may take up to 2m)...\n' \
+-        "${AWS_DRYRUN:-false}" >&2
+-
+-    local tmpfile result=0 elapsed=0
+-    tmpfile=$(mktemp)
+-    run_backup > "${tmpfile}" 2>&1 &
+-    local bgpid=$!
+-    while kill -0 "${bgpid}" 2>/dev/null; do
+-        sleep 10
+-        elapsed=$(( elapsed + 10 ))
+-        printf '  [%ds] backup in progress...\n' "${elapsed}" >&2
+-    done
+-    wait "${bgpid}" && result=0 || result=$?
+-
+-    local output
+-    output=$(cat "${tmpfile}")
+-    rm -f "${tmpfile}"
+-
+-    if [[ ${result} -ne 0 ]]; then
+-        echo "FAIL '${FUNCNAME[0]}': backup exited non-zero (${result})"
+-        printf '%s\n' "${output}" | tail -5 >&2
+-        return 1
+-    fi
+-    if echo "${output}" | grep -q 'finish backup'; then
+-        echo "PASS '${FUNCNAME[0]}': backup completed in ${elapsed}s (AWS_DRYRUN=${AWS_DRYRUN:-false})"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': 'finish backup' not found in output"
+-        printf '%s\n' "${output}" | tail -5 >&2
+-        return 1
+-    fi
+-}
+-
+-# test_staging_cron_fires: start the full service container and wait for the
+-# cron daemon to trigger a complete backup cycle.
+-# Expected duration: up to 4 m (≤60 s to first cron tick + backup run time).
+-test_staging_cron_fires() {
+-    _service_available || { _skip "switch or AWS not configured"; return 0; }
+-
+-    # Schedule every minute so the first fire is at most 60 s away.
+-    local container_id
+-    container_id=$(run_service_detached -e "CRON_EXPRESSION=* * * * *")
+-    printf '  container %s started; waiting for first cron backup (up to 4m)...\n' \
+-        "${container_id:0:12}" >&2
+-
+-    local elapsed=0 timeout=240 interval=10 found=false last_log
+-    while [[ ${elapsed} -lt ${timeout} ]]; do
+-        sleep "${interval}"
+-        elapsed=$(( elapsed + interval ))
+-        if docker logs "${container_id}" 2>&1 | grep -q 'finish backup'; then
+-            found=true
+-            break
+-        fi
+-        last_log=$(docker logs --tail 1 "${container_id}" 2>&1)
+-        printf '  [%ds] waiting... (last: %s)\n' "${elapsed}" "${last_log}" >&2
+-    done
+-
+-    docker stop "${container_id}" > /dev/null 2>&1
+-    docker rm   "${container_id}" > /dev/null 2>&1
+-
+-    if "${found}"; then
+-        echo "PASS '${FUNCNAME[0]}': cron backup completed within ${elapsed}s (AWS_DRYRUN=${AWS_DRYRUN:-false})"
+-    else
+-        echo "FAIL '${FUNCNAME[0]}': backup did not complete within ${timeout}s"
+-        return 1
+-    fi
+-}
+-
+-run_tests() {
+-    local passed=0
+-    local tests=(
+-        test_staging_help
+-        test_staging_version
+-        test_staging_unknown_option
+-        test_staging_format_invalid
+-        test_staging_all_excluded
+-        test_staging_default_tar
+-        test_staging_running_only
+-        test_staging_startup_only
+-        test_staging_backup_only
+-        test_staging_no_running
+-        test_staging_format_raw
+-        test_staging_name_file
+-        test_staging_backup_direct
+-        test_staging_cron_fires
+-    )
+-
+-    setup "${@}" || { echo "ERROR: Setup failed"; return 1; }
+-
+-    echo "Running staging tests for mokerlink-backup..."
+-    echo "=============================================="
+-    echo "Scans: Trivy=${_SCAN} Grype=${_ADVISE_GRYPE} Scout=${_ADVISE_SCOUT} Dive=${_ADVISE_DIVE}"
+-    echo "=============================================="
+-
+-    if [[ "${_SCAN}" == "true" ]]; then
+-        echo "==> Scan: Trivy ${IMAGE}" >&2
+-        _trivy_tar=$(mktemp /tmp/trivy-scan-XXXXXX.tar)
+-        trap 'rm -f "${_trivy_tar}"' EXIT
+-        docker image save "${IMAGE}" -o "${_trivy_tar}"
+-        docker run --rm \
+-            -v "${_trivy_tar}:/scan.tar:ro" \
+-            -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
+-            "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
+-                --exit-code 1 \
+-                --ignore-unfixed \
+-                --severity HIGH,CRITICAL \
+-                --input /scan.tar
+-        rm -f "${_trivy_tar}"
+-        trap - EXIT
+-    fi
+-
+-    if [[ "${_ADVISE_GRYPE}" == "true" ]]; then
+-        echo "==> Advise: Grype ${IMAGE}" >&2
+-        _grype_tar=$(mktemp /tmp/grype-scan-XXXXXX.tar)
+-        trap 'rm -f "${_grype_tar}"' EXIT
+-        docker image save "${IMAGE}" -o "${_grype_tar}"
+-        docker run --rm \
+-            -v "${_grype_tar}:/scan.tar:ro" \
+-            -v "${GRYPE_CACHE_VOLUME}:/root/.cache/grype" \
+-            "${GRYPE_IMAGE}:${GRYPE_TAG}" \
+-                docker-archive:/scan.tar || true
+-        rm -f "${_grype_tar}"
+-        trap - EXIT
+-    fi
+-
+-    if [[ "${_ADVISE_SCOUT}" == "true" ]]; then
+-        echo "==> Advise: Scout ${IMAGE}" >&2
+-        docker scout cves "${IMAGE}" || true
+-    fi
+-
+-    if [[ "${_ADVISE_DIVE}" == "true" ]]; then
+-        echo "==> Advise: Dive ${IMAGE}" >&2
+-        _dive_tar=$(mktemp /tmp/dive-scan-XXXXXX.tar)
+-        trap 'rm -f "${_dive_tar}"' EXIT
+-        docker save "${IMAGE}" > "${_dive_tar}"
+-        docker run --rm \
+-            -v "${_dive_tar}:/scan.tar:ro" \
+-            "${DIVE_IMAGE}:${DIVE_TAG}" \
+-                --source docker-archive \
+-                --ci \
+-                /scan.tar || true
+-        rm -f "${_dive_tar}"
+-        trap - EXIT
+-    fi
+-
+-    echo "=============================================="
+-    if _switch_available; then
+-        echo "Switch: ${MOKERLINK_HOST} (user: ${MOKERLINK_USER:-remote-backup})"
+-    else
+-        echo "Switch: not configured — switch-dependent tests will be skipped"
+-    fi
+-    echo "=============================================="
+-
+-    for test in "${tests[@]}"; do
+-        if "${test}"; then (( ++passed )); fi
+-    done
+-
+-    local failed=$(( ${#tests[@]} - passed ))
+-    echo "=============================================="
+-    echo "Results: ${passed} passed, ${failed} failed"
+-    return "${failed}"
+-}
+-
+-main() {
+-    while [[ $# -gt 0 ]]; do
+-        case "$1" in
+-            --image)
+-                IMAGE="$2"
+-                shift
+-                ;;
+-            --scan)
+-                _SCAN=true
+-                ;;
+-            --no-scan)
+-                _SCAN=false
+-                ;;
+-            --advise|--advice)
+-                _ADVISE_EXPLICIT=true
+-                if [[ $# -gt 1 && ! "$2" =~ ^-- ]]; then
+-                    advisements="$2"
+-                    shift
+-                else
+-                    advisements="grype,scout"
+-                fi
+-                _ADVISE_GRYPE=false
+-                _ADVISE_SCOUT=false
+-                _ADVISE_DIVE=false
+-                IFS=',' read -ra adv_list <<< "$advisements"
+-                for adv in "${adv_list[@]}"; do
+-                    case "$adv" in
+-                        grype)  _ADVISE_GRYPE=true ;;
+-                        scout)  _ADVISE_SCOUT=true ;;
+-                        dive)   _ADVISE_DIVE=true ;;
+-                        all)    _ADVISE_GRYPE=true; _ADVISE_SCOUT=true; _ADVISE_DIVE=true ;;
+-                        *)      echo "Unknown advisement: $adv" >&2; exit 1 ;;
+-                    esac
+-                done
+-                ;;
+-            --no-advise)
+-                _ADVISE_EXPLICIT=true
+-                _ADVISE_GRYPE=false
+-                _ADVISE_SCOUT=false
+-                _ADVISE_DIVE=false
+-                ;;
+-            --yes)
+-                _YES=true
+-                ;;
+-            --help|-h)
+-                show_help
+-                exit 0
+-                ;;
+-            -*)
+-                echo "Unknown option: $1" >&2
+-                exit 1
+-                ;;
+-            *)
+-                if [[ -z "${IMAGE:-}" ]]; then
+-                    IMAGE="$1"
+-                else
+-                    echo "Unexpected argument: $1" >&2
+-                    exit 1
+-                fi
+-                ;;
+-        esac
+-        shift
+-    done
+-
+-    if [[ "${_SCAN}" == "false" && "${_ADVISE_EXPLICIT}" == "false" ]]; then
+-        _ADVISE_GRYPE=false
+-        _ADVISE_SCOUT=false
+-        _ADVISE_DIVE=false
+-    fi
+-
+-    # ── Preflight: evaluate what will actually be touched ─────────────────────
+-    local image="${1:-${IMAGE:-<not set>}}"
+-    local bucket="${AWS_S3_BUCKET_NAME:-}"
+-    local pw_file="${MOKERLINK_PASSWORD_FILE:-"${HOME}/.secrets/mokerlink-password"}"
+-    local aws_cfg="${AWS_CONFIG_FILE:-"${HOME}/.secrets/aws-config"}"
+-
+-    local will_touch_switch=false will_touch_aws=false
+-    [[ -n "${MOKERLINK_HOST:-}" ]] && \
+-        { [[ -n "${MOKERLINK_PASSWORD:-}" ]] || [[ -r "${pw_file}" ]]; } && \
+-        will_touch_switch=true
+-    [[ -n "${bucket}" ]] && \
+-        { [[ -r "${aws_cfg}" ]] || [[ -n "${AWS_ACCESS_KEY_ID:-}" ]]; } && \
+-        will_touch_aws=true
+-
+-    # ── Warning header ────────────────────────────────────────────────────────
+-    echo "================================================================"
+-    echo " WARNING: test/staging exercises live infrastructure"
+-    echo "================================================================"
+-    echo ""
+-    echo "  Image:    ${image}"
+-    echo ""
+-
+-    if "${will_touch_switch}"; then
+-        echo "  Switch:   ${MOKERLINK_HOST}" \
+-             "(user: ${MOKERLINK_USER:-remote-backup})"
+-        echo "            SSH sessions will be opened to this host."
+-    else
+-        echo "  Switch:   not configured — switch tests will be skipped"
+-    fi
+-    echo ""
+-
+-    # ── Bucket safety check (may override AWS_DRYRUN) ────────────────────────
+-    # For buckets that do not look like test or staging, default to dry-run
+-    # to prevent accidental production writes.  AWS_DRYRUN=false overrides.
+-    local caution_bucket=false
+-    if [[ -n "${bucket}" ]] && \
+-       [[ "${bucket}" != test.* ]] && \
+-       [[ "${bucket}" != staging.* ]]; then
+-        caution_bucket=true
+-        if [[ "${AWS_DRYRUN:-}" != "false" ]]; then
+-            AWS_DRYRUN=true
+-            export AWS_DRYRUN
+-        fi
+-    fi
+-
+-    if "${will_touch_aws}"; then
+-        echo "  S3:       s3://${bucket}"
+-        if [[ "${AWS_DRYRUN:-false}" == "true" ]]; then
+-            echo "  Dry-run:  true — no files will be written to S3"
+-        else
+-            echo "  Dry-run:  false — FILES WILL BE WRITTEN TO THIS BUCKET"
+-        fi
+-    else
+-        echo "  S3:       not configured — service tests will be skipped"
+-    fi
+-    echo ""
+-
+-    if "${caution_bucket}"; then
+-        echo "  !! CAUTION !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+-        echo "  !! AWS_S3_BUCKET_NAME='${bucket}'"
+-        echo "  !! does not start with 'test.' or 'staging.'."
+-        if [[ "${AWS_DRYRUN:-false}" == "true" ]]; then
+-            echo "  !! AWS_DRYRUN forced to 'true'."
+-            echo "  !! Set AWS_DRYRUN=false to allow real S3 writes."
+-        else
+-            echo "  !! AWS_DRYRUN=false: real files WILL be written to S3."
+-        fi
+-        echo "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+-        echo ""
+-    fi
+-
+-    # ── Confirmation ──────────────────────────────────────────────────────────
+-    # Prompt only when real systems would be touched; default is to abort.
+-    if [[ "${_YES}" != "true" ]] && { "${will_touch_switch}" || "${will_touch_aws}"; }; then
+-        printf 'Type "yes" to proceed, or press Enter to abort: '
+-        local response
+-        read -r response
+-        echo ""
+-        if [[ "${response}" != "yes" ]]; then
+-            echo "Aborted."
+-            return 1
+-        fi
+-    fi
+-
+-    run_tests "$@"
+-}
+-
+-[[ "${BASH_SOURCE[0]}" == "$0" ]] && main "$@"

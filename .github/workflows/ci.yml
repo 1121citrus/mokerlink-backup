@@ -97,8 +97,11 @@ jobs:
       - name: Load image
         run: gunzip -c /tmp/image.tar.gz | docker load
 
+      - name: Install bats
+        run: sudo npm install -g bats@1.13.0
+
       - name: Run test suite
-        run: ./test/run-all
+        run: bats test/01-build.bats test/02-mokerlink-backup.bats test/03-backup-required-vars.bats test/04-backup-success.bats test/05-backup-encryption.bats test/06-healthcheck.bats
 
   # ── Stage 4: Security scan ─────────────────────────────────────────────────
   # Scans the built image before pushing.  Fails the job (and blocks push) if
