@@ -1,0 +1,4 @@
+# hadolint configuration for mokerlink-backup Dockerfile.
+# https://github.com/hadolint/hadolint
+
+failure-threshold: warning
