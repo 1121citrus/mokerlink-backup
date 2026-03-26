@@ -40,7 +40,7 @@ Tag-driven. Push a git tag to publish a release:
 ```bash
 git tag v1.2.3
 git push origin v1.2.3
-# Publishes: 1121citrus/mokerlink-backup:1.2.3 + :latest
+# Publishes: 1121citrus/mokerlink-backup:1.2.3 + :1.2 + :1 + :latest
 ```
 
 No automation bumps the version — the tag is always a deliberate decision.
@@ -104,11 +104,11 @@ Runs only when test and scan both pass, and only on version tags or the staging 
 
 | Trigger           | Docker Hub tags                                                |
 | ----------------- | -------------------------------------------------------------- |
-| Tag `v1.2.3`      | `1121citrus/mokerlink-backup:1.2.3` + `:latest`                |
-| Push to `staging` | `1121citrus/mokerlink-backup:staging-<timestamp>` + `:staging` |
+| Tag `v1.2.3`      | `1121citrus/mokerlink-backup:1.2.3` + `:1.2` + `:1` + `:latest` |
+| Push to `staging` | `1121citrus/mokerlink-backup:staging-<sha>` + `:staging`         |
 
 - `:latest` is set **only** on version-tagged releases
-- Staging gets a datetime timestamp (`staging-2026.03.18.134500`) for traceability
+- Staging uses a short commit SHA for traceability
 
 ### Build configuration
 

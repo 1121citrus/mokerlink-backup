@@ -136,8 +136,8 @@ jobs:
 
   # ── Stage 5: Push to Docker Hub ────────────────────────────────────────────
   # Runs only on version tags and the staging branch; never on plain main pushes.
-  # Version tags → image:X.Y.Z + image:latest
-  # Staging branch → image:staging-<timestamp> + image:staging
+  # Version tags → image:X.Y.Z + image:X.Y + image:X + image:latest
+  # Staging branch → image:staging-<sha> + image:staging
   push:
     needs: [test, scan]
     if: >
@@ -158,6 +158,8 @@ jobs:
           images: ${{ env.IMAGE }}
           tags: |
             type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
             type=sha,prefix=staging-,format=short,enable=${{ github.ref == 'refs/heads/staging' }}
             type=raw,value=staging,enable=${{ github.ref == 'refs/heads/staging' }}
