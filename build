@@ -178,6 +178,8 @@ parse_cache_rules() {
         value="${entry#*=}"
         key="${key//[[:space:]]/}"
         value="${value//[[:space:]]/}"
+        key="${key,,}"
+        value="${value,,}"
 
         if [[ -z "${key}" && -z "${value}" ]]; then
             continue
@@ -237,6 +239,8 @@ while [[ $# -gt 0 ]]; do
             ADVISE_DIVE=false
             IFS=',' read -ra adv_list <<< "$advisements"
             for adv in "${adv_list[@]}"; do
+                adv="${adv//[[:space:]]/}"
+                adv="${adv,,}"
                 case "$adv" in
                     grype)  ADVISE_GRYPE=true ;;
                     scout)  ADVISE_SCOUT=true ;;
@@ -288,12 +292,14 @@ fi
 
 # ---------------------------------------------------------------------------
 # Construct the tag list.
-# "latest" is only added for non-dev (release) builds that will be pushed.
+# "latest" is always applied locally so test scripts that default to
+# IMAGE=:latest pick up the freshly built image.  For pushed dev builds
+# (VERSION matches dev-*), :latest is omitted to avoid polluting the registry.
 # ---------------------------------------------------------------------------
 full_image="${REGISTRY}/${IMAGE_NAME}"
-tags=("--tag" "${full_image}:${VERSION}")
-if [[ "${PUSH}" == "true" && "${VERSION}" != dev-* ]]; then
-    tags+=("--tag" "${full_image}:latest")
+tags=("--tag" "${full_image}:${VERSION}" "--tag" "${full_image}:latest")
+if [[ "${PUSH}" == "true" && "${VERSION}" == dev-* ]]; then
+    tags=("--tag" "${full_image}:${VERSION}")
 fi
 
 # ---------------------------------------------------------------------------
@@ -382,12 +388,6 @@ if [[ "${LINT}" == "true" ]]; then
         src/bin/mokerlink-backup \
         src/bin/startup \
         test/run-all \
-        test/build-options \
-        test/backup-required-vars \
-        test/backup-success \
-        test/backup-encryption \
-        test/healthcheck \
-        test/mokerlink-backup \
         test/staging \
         test/bin/*)
 
@@ -437,10 +437,13 @@ if [[ "${TEST}" == "true" ]]; then
     echo "==> Stage 3: Test" >&2
     run chmod +x \
         "${script_dir}/test/run-all" \
-        "${script_dir}/test/build-options" \
+        "${script_dir}/test/01-build.bats" \
+        "${script_dir}/test/02-mokerlink-backup.bats" \
+        "${script_dir}/test/03-backup-required-vars.bats" \
+        "${script_dir}/test/04-backup-success.bats" \
+        "${script_dir}/test/05-backup-encryption.bats" \
+        "${script_dir}/test/06-healthcheck.bats" \
         "${script_dir}/test/staging" \
-        "${script_dir}/test/backup-"* \
-        "${script_dir}/test/healthcheck" \
         "${script_dir}/test/bin/"*
     # Export IMAGE so each test script targets the image just built.
     (cd "${script_dir}" && IMAGE="${full_image}:${VERSION}" run ./test/run-all)
