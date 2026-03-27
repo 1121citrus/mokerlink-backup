@@ -22,64 +22,14 @@ env:
 jobs:
   # ── Stage 1: Lint ──────────────────────────────────────────────────────────
   lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Lint Dockerfile with hadolint
-        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
-        with:
-          dockerfile: Dockerfile
-          config: .hadolint.yaml
-
-      - name: Lint shell scripts with shellcheck
-        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
-        with:
-          scandir: "."
-          severity: warning
-
-      - name: Lint markdown with markdownlint-cli
-        run: |
-          docker run --rm \
-            -v "$PWD:/workdir:ro" \
-            -w /workdir \
-            ghcr.io/igorshubovych/markdownlint-cli:v0.48.0 \
-            "**/*.md"
+    uses: 1121citrus/shared-github-workflows/.github/workflows/lint.yml@main
 
   # ── Stage 2: Build ─────────────────────────────────────────────────────────
-  # Build image once, share as artifact so test and scan work on the same image.
   build:
     needs: lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
-      - name: Build image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          load: true
-          tags: ${{ env.IMAGE }}:ci-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Re-tag as :latest so test scripts that default to IMAGE:latest work
-      # without modification.
-      - name: Re-tag as :latest for test scripts
-        run: docker tag "$IMAGE:ci-${{ github.sha }}" "$IMAGE:latest"
-
-      - name: Save image for downstream jobs
-        run: docker save "$IMAGE:latest" | gzip > /tmp/image.tar.gz
-
-      - name: Upload image artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: docker-image
-          path: /tmp/image.tar.gz
-          retention-days: 1
+    uses: 1121citrus/shared-github-workflows/.github/workflows/build.yml@main
+    with:
+      image: 1121citrus/mokerlink-backup
 
   # ── Stage 3: Test ──────────────────────────────────────────────────────────
   test:
@@ -114,44 +64,13 @@ jobs:
             -c "apk add --quiet --no-cache docker-cli >/dev/null 2>&1 && bats test"
 
   # ── Stage 4: Security scan ─────────────────────────────────────────────────
-  # Scans the built image before pushing.  Fails the job (and blocks push) if
-  # any fixable HIGH or CRITICAL CVEs are found; unfixed CVEs are suppressed.
   scan:
     needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download image artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: docker-image
-          path: /tmp
-
-      - name: Load image
-        run: gunzip -c /tmp/image.tar.gz | docker load
-
-      - name: Cache Trivy vulnerability DB
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cache/trivy
-          key: trivy-db-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: trivy-db-${{ runner.os }}-
-
-      - name: Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
-        with:
-          image-ref: ${{ env.IMAGE }}:latest
-          format: table
-          severity: CRITICAL,HIGH
-          exit-code: '1'
-          ignore-unfixed: true
-        env:
-          TRIVY_NO_PROGRESS: "true"
-          TRIVY_QUIET: "true"
+    uses: 1121citrus/shared-github-workflows/.github/workflows/scan.yml@main
+    with:
+      image: 1121citrus/mokerlink-backup
 
   # ── Stage 5: Push to Docker Hub ────────────────────────────────────────────
-  # Runs only on version tags and the staging branch; never on plain main pushes.
-  # Version tags → image:X.Y.Z + image:X.Y + image:X + image:latest
-  # Staging branch → image:staging-<sha> + image:staging
   push:
     needs: [test, scan]
     if: >
@@ -159,56 +78,7 @@ jobs:
         startsWith(github.ref, 'refs/tags/v') ||
         github.ref == 'refs/heads/staging'
       )
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
-            type=sha,prefix=staging-,format=short,enable=${{ github.ref == 'refs/heads/staging' }}
-            type=raw,value=staging,enable=${{ github.ref == 'refs/heads/staging' }}
-
-      - name: Build metadata extras
-        id: extras
-        run: |
-          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          echo "date=$(date -u +%Y%m%dT%H%M%S)" >> "$GITHUB_OUTPUT"
-
-      - name: Set up QEMU (multi-platform cross-compilation)
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push (multi-platform)
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          sbom: true
-          provenance: mode=max
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VERSION=${{ steps.meta.outputs.version }}
-            GIT_COMMIT=${{ steps.extras.outputs.commit }}
-            BUILD_DATE=${{ steps.extras.outputs.date }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+    uses: 1121citrus/shared-github-workflows/.github/workflows/push.yml@main
+    with:
+      image: 1121citrus/mokerlink-backup
+    secrets: inherit

@@ -1,32 +1,34 @@
-# GitHub CI Workflows
+# GitHub CI workflows
 
-Automated linting, building, testing, security scanning, and Docker image publication for mokerlink-backup.
+Automated linting, building, testing, security scanning, and Docker image publication
+for mokerlink-backup.
 
-## Workflow Overview
+## Workflow overview
 
-| Stage          | Trigger                                    | Purpose                                          |
-| -------------- | ------------------------------------------ | ------------------------------------------------ |
-| **Lint**       | All pushes to main/staging, PRs, tags      | Validate Dockerfile and shell scripts            |
-| **Build**      | After lint                                 | Build image and share as artifact                |
-| **Test**       | After build (parallel with scan)           | Run full test suite against built image          |
-| **Scan**       | After build (parallel with test)           | Trivy image scan — blocks push on fixable CVEs   |
-| **Push**       | Version tags and staging branch only       | Multi-platform build and push to Docker Hub      |
-| **Dependabot**     | Weekly (Monday 06:00 UTC)                  | Keep GitHub Actions versions current             |
-| **Release Please** | Push to main/master                        | Open release PR; create tag and GitHub Release   |
+| Stage | Trigger | Purpose |
+| ----- | ------- | ------- |
+| **Lint** | All pushes, PRs to main/master, tags | Validate Dockerfile and shell scripts |
+| **Build** | After lint | Build image and share as artifact |
+| **Test** | After build (parallel with scan) | Run integration test suite |
+| **Scan** | After build (parallel with test) | Trivy image scan — blocks push on fixable CVEs |
+| **Push** | Version tags and staging branch only | Multi-platform build and push to Docker Hub |
+| **Dependabot** | Weekly (Monday 06:00 UTC) | Keep GitHub Actions versions current |
+| **Release Please** | Push to main/master | Open release PR; create tag and GitHub Release |
 
-## CI Workflow (`ci.yml`)
+## CI workflow (`ci.yml`)
 
-Single unified workflow for all CI/CD stages.
+Lint, Build, Scan, and Push delegate to shared reusable workflows in
+[1121citrus/shared-github-workflows](https://github.com/1121citrus/shared-github-workflows).
+The Test job is defined inline because it is specific to this repo.
 
 ### Global configuration
 
 - **Image name:** `1121citrus/mokerlink-backup`
-- **Node.js actions runtime:** v24 (via `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`)
 
-### Trigger Events
+### Trigger events
 
-- **Push:** `main`, `staging` branches and `v*` version tags
-- **Pull requests:** To `main` branch
+- **Push:** `main`, `master`, `staging` branches and `v*` version tags
+- **Pull requests:** To `main` or `master` branches
 
 ### Concurrency
 
@@ -44,161 +46,111 @@ git push origin v1.2.3
 # Publishes: 1121citrus/mokerlink-backup:1.2.3 + :1.2 + :1 + :latest
 ```
 
-No automation bumps the version — the tag is always a deliberate decision.
-
 ---
 
 ## Stage 1: Lint
 
-- **Hadolint** — Dockerfile best-practice checks
-- **ShellCheck** — static analysis of all executable shell scripts:
-  - `build`
-  - `src/common-functions`, `src/bin/backup`, `src/bin/get-backup-config`, `src/bin/get-config`, `src/bin/get-running-config`, `src/bin/get-startup-config`, `src/bin/healthcheck`, `src/bin/mokerlink-backup`, `src/bin/startup`
-  - `test/run-all`, `test/backup-required-vars`, `test/backup-success`, `test/backup-encryption`, `test/build-options`, `test/healthcheck`, `test/mokerlink-backup`, `test/staging`, `test/bin/*`
+Shared workflow: `lint.yml` — runs Hadolint, ShellCheck, and markdownlint-cli.
 
 ---
 
 ## Stage 2: Build
 
-Builds image for the host platform (`linux/amd64`) and exports it as a GitHub Actions artifact (`docker-image`). The image is re-tagged as `:latest` so test scripts that default to `IMAGE:latest` work without modification.
-
-Artifact retention: 1 day (sufficient for the duration of the workflow).
-
-**Docker layer cache:** `cache-from: type=gha` / `cache-to: type=gha,mode=max` — build
-layers are saved to and restored from GitHub Actions cache, speeding up incremental
-builds. The push job restores from the same cache.
+Shared workflow: `build.yml` — builds image once and exports it as the
+`docker-image` artifact. Re-tagged as `:latest`. Artifact retention: 1 day.
 
 ---
 
 ## Stage 3: Test
 
-Runs in parallel with the scan job. Downloads the artifact, loads the image, and executes the full test suite via `test/run-all`:
+Inline job. Downloads the artifact, loads the image, and runs the bats suite
+in a `bats/bats:1.13.0` container with the Docker socket and `/tmp` mounted:
 
-- `mokerlink-backup` — validates CLI option parsing, config selection flags, and output formats
-- `backup-required-vars` — validates required environment variables
-- `backup-success` — verifies successful backup operation
-- `backup-encryption` — tests backup encryption
-- `healthcheck` — exercises the container health check
+```bash
+docker run --rm -i \
+  -v "$PWD:$PWD" -v /tmp:/tmp \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e "IMAGE=1121citrus/mokerlink-backup:latest" \
+  --workdir "$PWD" --entrypoint sh bats/bats:1.13.0 \
+  -c "apk add --quiet --no-cache docker-cli >/dev/null 2>&1 && bats test"
+```
 
 ---
 
 ## Stage 4: Security scan
 
-Runs in parallel with the test job. Scans the local image **before** it is pushed to Docker Hub.
-
-- **Tool:** Trivy `aquasecurity/trivy-action@0.35.0` (pinned)
-- **Severity:** CRITICAL, HIGH
-- **Blocking:** `exit-code: 1` — fails and blocks push if fixable CVEs found
-- **Noise reduction:** `ignore-unfixed: true` — suppresses CVEs with no available patch
-- **DB caching:** `~/.cache/trivy` is cached between runs with `actions/cache`; the
-  vulnerability DB is only re-downloaded when the cache is cold or the DB has been updated
-- **Download noise:** `TRIVY_NO_PROGRESS=true` suppresses progress bars; `TRIVY_QUIET=true`
-  suppresses `INFO [vulndb]` log lines during DB download
+Shared workflow: `scan.yml` — Trivy CRITICAL/HIGH scan of the built image
+before it is pushed. Fails and blocks push on any fixable CVE.
 
 ---
 
 ## Stage 5: Push to Docker Hub
 
-Runs only when test and scan both pass, and only on version tags or the staging branch.
+Shared workflow: `push.yml` — runs only when test and scan both pass, and
+only on version tags or the staging branch.
 
 ### Tagging
 
-| Trigger           | Docker Hub tags                                                |
-| ----------------- | -------------------------------------------------------------- |
-| Tag `v1.2.3`      | `1121citrus/mokerlink-backup:1.2.3` + `:1.2` + `:1` + `:latest` |
-| Push to `staging` | `1121citrus/mokerlink-backup:staging-<sha>` + `:staging`         |
-
-- `:latest` is set **only** on version-tagged releases
-- Staging uses a short commit SHA for traceability
+| Trigger | Docker Hub tags |
+| ------- | --------------- |
+| Tag `v1.2.3` | `1121citrus/mokerlink-backup:1.2.3` + `:1.2` + `:1` + `:latest` |
+| Push to `staging` | `1121citrus/mokerlink-backup:staging-<sha>` + `:staging` |
 
 ### Build configuration
 
 - **Platforms:** `linux/amd64`, `linux/arm64`
 - **Attestations:** `sbom: true` + `provenance: mode=max` (SLSA L3)
-- **Layer cache:** `cache-from: type=gha` / `cache-to: type=gha,mode=max`
 
 ---
 
-## Execution Flow
+## Execution flow
 
 ```text
-On push to main/staging or PR to main
+On push/PR
     ↓
-[Lint] — hadolint + shellcheck
+[Lint] — shared: hadolint + shellcheck + markdownlint
     ↓
-[Build] — single-arch image → artifact
+[Build] — shared: single-arch image → artifact
     ↓ (parallel)
 [Test]                        [Scan]
- - load artifact               - load artifact
- - run test/run-all            - Trivy CRITICAL/HIGH
- - ✅/❌                        - ✅/❌ blocks push
+ - load artifact               - shared: Trivy CRITICAL/HIGH
+ - bats in bats:1.13.0         - ✅/❌ blocks push
+ - ✅/❌
 
 [Push] (tags and staging only, after Test + Scan pass)
- - QEMU + Buildx multi-arch
+ - shared: QEMU + Buildx multi-arch
  - push amd64 + arm64
  - SBOM + provenance
 ```
 
 ---
 
-## Configuration Reference
+## Configuration reference
 
-### Required Secrets
+### Required secrets
 
 - `DOCKERHUB_USERNAME` — Docker Hub account
 - `DOCKERHUB_TOKEN` — Docker Hub access token
 
-### Key Files
+### Key files
 
-- `Dockerfile` — Container build definition
-- `src/` — Application shell scripts
-- `test/run-all` — Test runner
-- `test/mokerlink-backup`, `test/backup-*`, `test/healthcheck` — Individual test scripts
-- `test/bin/` — Mock binaries used by tests
+- `Dockerfile` — container build definition
+- `src/` — backup scripts
+- `test/` — bats test suite
 
 ## Automated dependency updates
 
 `dependabot.yml` configures weekly automated PRs to keep GitHub Actions current.
 
-- **Schedule:** Every Monday at 06:00 UTC
-- **Scope:** GitHub Actions (`package-ecosystem: github-actions`) — updates action pins in
-  `.github/workflows/*.yml`
-- **Labels:** `dependencies`, `github-actions`
-- **Security benefit:** Dependabot also proposes SHA-pinned digests (recommended for SLSA /
-  OpenSSF Scorecard hardening)
-
----
-
-## Local Workflow Parity
-
-- `./build` supports `--advice` (alias for `--advise`) and `--cache` for one-run scanner cache controls.
-- `test/staging` supports `--scan`, `--no-scan`, `--advise`, and `--no-advise` for live-image validation.
-
 ---
 
 ## Automated releases (release-please)
 
-`release-please.yml` watches for [conventional commits](https://www.conventionalcommits.org/)
-merged to `main`/`master` and automates the release lifecycle:
-
-1. Opens a "release PR" that bumps `version.txt`, prepends to `CHANGELOG.md`, and proposes the next semver tag
-2. When the release PR is merged, creates a GitHub Release and pushes the version tag
-3. The existing CI `push` job fires on the new tag and builds and publishes the Docker image
-
-### Conventional commit types that trigger version bumps
-
-| Commit prefix | Bump |
-|---|---|
-| `fix:` | patch (1.0.x) |
-| `feat:` | minor (1.x.0) |
-| `feat!:` or `BREAKING CHANGE:` | major (x.0.0) |
-
-All other prefixes (`ci:`, `docs:`, `chore:`, `refactor:`, `test:`, etc.) appear in the
-changelog but do not trigger a version bump on their own.
+`release-please.yml` delegates to the shared `release-please.yml` workflow.
 
 ### Configuration
 
-- `release-please-config.json` — release type (`simple`) and package root
-- `.release-please-manifest.json` — current version (updated by release-please on each release)
-- `version.txt` — plain-text version file (updated by release-please; can be referenced in Dockerfile)
+- `release-please-config.json` — release type and package root
+- `.release-please-manifest.json` — current version
+- `version.txt` — plain-text version file
 - `CHANGELOG.md` — generated/updated by release-please

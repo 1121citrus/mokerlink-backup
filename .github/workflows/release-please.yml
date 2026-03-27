@@ -4,21 +4,12 @@ on:
   push:
     branches: [main, master]
 
-# Release Please needs write access to open release PRs and push tags.
+# release-please-action needs write access to open release PRs and push tags.
 permissions:
   contents: write
   pull-requests: write
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   release-please:
-    runs-on: ubuntu-latest
-    steps:
-      # googleapis/release-please-action reads release-please-config.json and
-      # .release-please-manifest.json from the repo root.
-      # Dependabot will propose a SHA pin for this action on the next weekly run.
-      - uses: googleapis/release-please-action@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+    uses: 1121citrus/shared-github-workflows/.github/workflows/release-please.yml@main
+    secrets: inherit
