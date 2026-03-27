@@ -95,6 +95,7 @@ teardown() {
 
 @test "name file is written with expected filename" {
     TEST_TMPDIR=$(mktemp -d)
+    chmod o+w "${TEST_TMPDIR}"
     run run_mokerlink_backup \
         -e MOKERLINK_BACKUP_NAME_FILE=/name/result \
         -v "${TEST_TMPDIR}:/name"
