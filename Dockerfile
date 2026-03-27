@@ -24,6 +24,7 @@ FROM alpine:${ALPINE_TAG}
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_DATE=unknown
+ARG UID=10001
 
 # OCI image annotations (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
 LABEL org.opencontainers.image.title="mokerlink-backup" \
@@ -60,9 +61,15 @@ RUN set -Eeux; \
         'xz>5.6' \
         'zip>3.0' \
         && \
-    install -d -m 700 /root/.gnupg /root/.ssh && \
-    touch /root/.gnupg/pubring.kbx && \
-    chmod 600 /root/.gnupg/pubring.kbx && \
+    adduser \
+        --disabled-password --gecos "" --shell "/sbin/nologin" \
+        --uid "${UID}" mokerlink-backup && \
+    install -d -m 0700 -o mokerlink-backup \
+        /home/mokerlink-backup/.gnupg \
+        /home/mokerlink-backup/.ssh && \
+    install -m 0600 -o mokerlink-backup /dev/null \
+        /home/mokerlink-backup/.gnupg/pubring.kbx && \
+    install -d -m 0755 -o mokerlink-backup /var/spool/cron/crontabs && \
     mkdir -pv /usr/local/include/bash && \
     ln -sf /usr/local/bin/common-functions /usr/local/include/bash/common-functions && \
     mkdir -p /usr/local/share/mokerlink-backup && \
@@ -71,6 +78,8 @@ RUN set -Eeux; \
 
 COPY --chmod=755 ./src/bin/* /usr/local/bin
 COPY --chmod=755 ./src/common-functions /usr/local/bin/
+
+USER mokerlink-backup
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD /usr/local/bin/healthcheck
 

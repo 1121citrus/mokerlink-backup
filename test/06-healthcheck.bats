@@ -31,8 +31,8 @@ setup() {
     local script
     script='mkdir -p /var/spool/cron/crontabs'
     script+=' && printf "%s\n" "* * * * * /usr/local/bin/backup 2>&1"'
-    script+=' > /var/spool/cron/crontabs/root'
-    script+=' && chmod 0600 /var/spool/cron/crontabs/root'
+    script+=' > /var/spool/cron/crontabs/$(id -un)'
+    script+=' && chmod 0600 /var/spool/cron/crontabs/$(id -un)'
     script+=' && crond -l 2 && sleep 0.5'
     script+=' && /usr/local/bin/healthcheck'
     run run_healthcheck "${script}"

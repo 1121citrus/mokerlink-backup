@@ -122,11 +122,12 @@ Recommended S3 bucket configuration:
 
 ## Container hardening
 
-- The container runs as `root` because Alpine's `crond` requires it.  If the
-  switch user can be run as non-root in a future revision, consider adding a
-  dedicated UID.
+- The container runs as the dedicated `mokerlink-backup` user (UID 10001,
+  shell `/sbin/nologin`, no login shell).  The crontab is written to
+  `/var/spool/cron/crontabs/mokerlink-backup`; `crond` reads it as that user.
 - The `~/.gnupg` and `~/.ssh` directories are created with mode `700` and
-  `~/.gnupg/pubring.kbx` with mode `600` in the Dockerfile.
+  `~/.gnupg/pubring.kbx` with mode `600` in the Dockerfile, all owned by
+  the service user.
 - No ports are exposed; the container initiates all outbound connections.
 - The image is built with `--sbom=true --provenance=mode=max` to enable supply
   chain attestation inspection.

@@ -61,10 +61,10 @@ source "${ENV}"
 # Add our cron entry, and direct stdout & stderr to Docker commands stdout
 COMMAND=${COMMAND:-/usr/local/bin/backup}
 info "installing cron.d entry: ${COMMAND}"
-(mkdir -pv /var/spool/cron/crontabs && chmod -c 0755 /var/spool/cron/crontabs) | info
-echo "${CRON_EXPRESSION} ${COMMAND} 2>&1" > /var/spool/cron/crontabs/root
-chmod -c 0600 /var/spool/cron/crontabs/root | info
-info "crontab: $(cat /var/spool/cron/crontabs/root)"
+_crontab="/var/spool/cron/crontabs/$(id -un)"
+echo "${CRON_EXPRESSION} ${COMMAND} 2>&1" > "${_crontab}"
+chmod -c 0600 "${_crontab}" | info
+info "crontab: $(cat "${_crontab}")"
 
 info "handing the reins over to cron daemon"
 exec crond -l 2 -f
