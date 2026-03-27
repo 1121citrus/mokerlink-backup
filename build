@@ -33,12 +33,16 @@
 #                       Also skips advisements (stage 5) by default; pass --advise
 #                       after --no-scan to keep the advisory scans.
 #   --advise [ADVISEMENTS]
-#                       Run advisory scans. Optional comma-delimited list of advisements:
-#                       'grype', 'scout', 'dive', 'all', or any combination, e.g. 'grype,scout,dive'
-#                       (default if no list given: 'grype,scout').
+#                       Run advisory scans. Comma-delimited list:
+#                       'grype', 'scout', 'dive', 'all', 'none', or any
+#                       combination, e.g. 'grype,scout'. 'none' disables
+#                       all advisements (equivalent to --no-advise).
+#                       Default with no list given: 'grype,scout'.
+#                       Advisory scans are off by default.
 #   --advice [ADVISEMENTS]
-#                       Compatibility alias for --advise.
-#   --no-advise         Skip all advisory scans (Grype, Docker Scout, and Dive).
+#                       Synonym for --advise.
+#   --no-advise         Disable all advisory scans (equivalent to
+#                       --advise none).
 #   --cache CACHE_RULES One-run cache controls for scanner DBs.
 #                       Rule format: 'reset=<targets>;skip-update=<targets>'
 #                       Targets: trivy, grype, all (comma-delimited)
@@ -95,8 +99,8 @@ PROVENANCE=true
 LINT=${BUILD_LINT:-true}
 TEST=${BUILD_TEST:-true}
 SCAN=${BUILD_SCAN:-true}
-ADVISE_GRYPE=true
-ADVISE_SCOUT=true
+ADVISE_GRYPE=false
+ADVISE_SCOUT=false
 ADVISE_DIVE=false
 _ADVISE_EXPLICIT=false   # set true when --advise or --no-advise is passed
 CACHE_RESET_TRIVY=false
@@ -246,6 +250,7 @@ while [[ $# -gt 0 ]]; do
                     scout)  ADVISE_SCOUT=true ;;
                     dive)   ADVISE_DIVE=true ;;
                     all)    ADVISE_GRYPE=true; ADVISE_SCOUT=true; ADVISE_DIVE=true ;;
+                    none)   ADVISE_GRYPE=false; ADVISE_SCOUT=false; ADVISE_DIVE=false ;;
                     *)      echo "Unknown advisement: $adv" >&2; exit 1 ;;
                 esac
             done

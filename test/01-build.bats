@@ -45,6 +45,59 @@ setup() {
     [[ "${output}" == *"Stage 5c: Advise (Dive)"* ]]
 }
 
+@test "build --advise none disables all advisements" {
+    run "${BUILD}" --advise none --dry-run --no-lint --no-test --no-scan
+    [ "$status" -eq 0 ]
+    [[ "${output}" != *"Stage 5a"* ]]
+    [[ "${output}" != *"Stage 5b"* ]]
+    [[ "${output}" != *"Stage 5c"* ]]
+}
+
+@test "build --advise NONE disables all advisements" {
+    run "${BUILD}" --advise NONE --dry-run --no-lint --no-test --no-scan
+    [ "$status" -eq 0 ]
+    [[ "${output}" != *"Stage 5a"* ]]
+    [[ "${output}" != *"Stage 5b"* ]]
+    [[ "${output}" != *"Stage 5c"* ]]
+}
+
+@test "build --advice none disables all advisements" {
+    run "${BUILD}" --advice none --dry-run --no-lint --no-test --no-scan
+    [ "$status" -eq 0 ]
+    [[ "${output}" != *"Stage 5a"* ]]
+    [[ "${output}" != *"Stage 5b"* ]]
+    [[ "${output}" != *"Stage 5c"* ]]
+}
+
+@test "build --no-advise disables all advisements" {
+    run "${BUILD}" --no-advise --dry-run --no-lint --no-test --no-scan
+    [ "$status" -eq 0 ]
+    [[ "${output}" != *"Stage 5a"* ]]
+    [[ "${output}" != *"Stage 5b"* ]]
+    [[ "${output}" != *"Stage 5c"* ]]
+}
+
+@test "build --advise scout,dive enables Scout and Dive" {
+    run "${BUILD}" --advise scout,dive --dry-run --no-lint --no-test --no-scan
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"Stage 5b: Advise (Scout)"* ]]
+    [[ "${output}" == *"Stage 5c: Advise (Dive)"* ]]
+}
+
+@test "build --advise rejects unknown advisement" {
+    run "${BUILD}" --advise unknown --dry-run
+    [ "$status" -eq 1 ]
+    [[ "${output}" == *"Unknown advisement"* ]]
+}
+
+@test "build defaults to no advisory scans" {
+    run "${BUILD}" --dry-run --no-lint --no-test --no-scan
+    [ "$status" -eq 0 ]
+    [[ "${output}" != *"Stage 5a"* ]]
+    [[ "${output}" != *"Stage 5b"* ]]
+    [[ "${output}" != *"Stage 5c"* ]]
+}
+
 @test "build --cache reset=all resets Trivy DB" {
     local output
     output=$("${BUILD}" --cache "reset=all" --dry-run --no-lint --no-test --no-scan --no-advise 2>&1)
