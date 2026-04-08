@@ -51,7 +51,9 @@ function is_crond_running() {
 }
 
 function is_crontab_configured() {
-    if (crontab -l | grep -q '/backup'); then
+    local crontab_file
+    crontab_file="/var/spool/cron/crontabs/$(id -un)"
+    if [[ -f "${crontab_file}" ]] && grep -q '/backup' "${crontab_file}"; then
         return 0
     else
         error crontab is not configured

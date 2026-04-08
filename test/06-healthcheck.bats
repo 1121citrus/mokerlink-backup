@@ -35,7 +35,8 @@ setup() {
     script+=' && chmod 0600 /var/spool/cron/crontabs/$(id -un)'
     script+=' && crond -l 2 && sleep 0.5'
     script+=' && /usr/local/bin/healthcheck'
-    run run_healthcheck "${script}"
+    run run_healthcheck "${script}" \
+        --tmpfs /var/spool/cron/crontabs:uid=10001,gid=10001,mode=0700
     [ "$status" -eq 0 ]
 }
 
