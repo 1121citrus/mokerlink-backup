@@ -18,8 +18,9 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-ARG ALPINE_TAG=3.22
-FROM alpine:${ALPINE_TAG}
+# Pin the Alpine minor version so Dependabot can track base-image updates
+# and bumps are explicit, reviewable changes rather than silent upgrades.
+FROM alpine:3.22
 
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown

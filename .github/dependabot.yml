@@ -23,3 +23,16 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+
+  # ── Docker ──────────────────────────────────────────────────────────────────
+  # Tracks the alpine base image pinned directly in the FROM line.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "docker"
