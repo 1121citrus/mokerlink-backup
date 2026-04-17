@@ -1,21 +1,47 @@
 #!/usr/bin/env bash
 
-# An application specific service to create Mokerlink switch backups and copy them off site.
+# backup — download a Mokerlink switch configuration and upload it to S3.
 #
 # Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# SYNOPSIS
+#   backup [options]
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
+# OPTIONS
+#   -?,--help              Display this help text
+#   -v,--version           Display command version
+#   --bucket BUCKET        S3 bucket name (env: AWS_S3_BUCKET_NAME)
+#   --aws-config FILE      AWS config file (env: AWS_CONFIG_FILE;
+#                          default: /run/secrets/aws-config)
+#   --aws-certificate FILE Custom CA certificate bundle for AWS API calls
+#                          (env: AWS_CA_BUNDLE)
+#   --gpg-passphrase PW    GPG encryption passphrase (env: GPG_PASSPHRASE;
+#                          prefer --gpg-passphrase-file)
+#   --gpg-passphrase-file FILE
+#                          Path to GPG passphrase file (env: GPG_PASSPHRASE_FILE;
+#                          default: /run/secrets/gpg-passphrase)
+#   --dryrun               Dry-run S3 operations (env: AWS_DRYRUN=true)
 #
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# ENVIRONMENT
+#   AWS_S3_BUCKET_NAME     S3 bucket name (required unless --bucket given)
+#   AWS_CONFIG_FILE        AWS config file (default: /run/secrets/aws-config)
+#   AWS_CA_BUNDLE          Custom CA certificate bundle path
+#   AWS_DRYRUN             Set 'true' to skip real S3 writes (default: false)
+#   COMPRESSION            Compression algorithm (default: none)
+#                          One of: bzip2, bzip3, gz, lzo, lzma, none,
+#                          pigz, pixz, xz, zip
+#   GPG_PASSPHRASE         GPG passphrase for symmetric encryption
+#   GPG_PASSPHRASE_FILE    Path to GPG passphrase file
+#                          (default: /run/secrets/gpg-passphrase)
+#   MOKERLINK_HOST         Switch hostname or IP (required)
+#   MOKERLINK_USER         SSH username (default: remote-backup)
+#   MOKERLINK_PASSWORD     Switch password
+#   MOKERLINK_PASSWORD_FILE
+#                          Path to switch password file
+#                          (default: /run/secrets/mokerlink-password)
+#   DEBUG                  Enable debug tracing (default: false)
+#   ENV                    Env-file path (default: ~/.env)
 
 command=$(basename "${0}")
 bindir=$(readlink -f "$(dirname "${0}")")
@@ -30,15 +56,89 @@ set -o errexit -o errtrace -o nounset -o pipefail
 [[ -r "${ENV}" ]] && source "${ENV}"
 is_true "${DEBUG:=false}" && set -o xtrace -o verbose
 
-export AWS_CONFIG_FILE="${AWS_CONFIG_FILE:=/run/secrets/aws-config}"
+show_help() {
+    sed -n '/^# SYNOPSIS/,/^[^#]/p' "$0" \
+        | grep '^#' \
+        | sed 's/^# \{0,1\}//'
+}
 
-bucket="${AWS_S3_BUCKET_NAME:=}"
-[[ -n "${bucket}" ]] || error 'need AWS_S3_BUCKET_NAME'
-dryrun="${AWS_DRYRUN:=false}"
+show_version() {
+    cat /usr/local/share/mokerlink-backup/version 2>/dev/null || echo "unknown"
+}
+
+# Parse CLI arguments; overrides corresponding environment variables.
+_cli_bucket=
+_cli_aws_config=
+_cli_aws_cert=
+_cli_gpg_passphrase=
+_cli_gpg_passphrase_file=
+_cli_dryrun=
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -\?|--help)
+            show_help
+            exit 0
+            ;;
+        -v|--version)
+            show_version
+            exit 0
+            ;;
+        --bucket)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            _cli_bucket="$2"; shift
+            ;;
+        --aws-config)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            _cli_aws_config="$2"; shift
+            ;;
+        --aws-certificate)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            _cli_aws_cert="$2"; shift
+            ;;
+        --gpg-passphrase)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            _cli_gpg_passphrase="$2"; shift
+            ;;
+        --gpg-passphrase-file)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            _cli_gpg_passphrase_file="$2"; shift
+            ;;
+        --dryrun|--dry-run)
+            _cli_dryrun=true
+            ;;
+        --)
+            shift; break
+            ;;
+        -*)
+            error "unknown option: '${1}'"
+            ;;
+        *)
+            error "unexpected argument: '${1}'"
+            ;;
+    esac
+    shift
+done
+
+# Apply CLI overrides to environment variables.
+[[ -n "${_cli_bucket}" ]]             && AWS_S3_BUCKET_NAME="${_cli_bucket}"
+[[ -n "${_cli_aws_config}" ]]         && AWS_CONFIG_FILE="${_cli_aws_config}"
+[[ -n "${_cli_aws_cert}" ]]           && AWS_CA_BUNDLE="${_cli_aws_cert}"
+[[ -n "${_cli_dryrun}" ]]             && AWS_DRYRUN="${_cli_dryrun}"
+[[ -n "${_cli_gpg_passphrase}" ]]     && GPG_PASSPHRASE="${_cli_gpg_passphrase}"
+[[ -n "${_cli_gpg_passphrase_file}" ]] && GPG_PASSPHRASE_FILE="${_cli_gpg_passphrase_file}"
+
+# Export AWS config and optional CA bundle; AWS CLI picks them up automatically.
+export AWS_CONFIG_FILE="${AWS_CONFIG_FILE:-/run/secrets/aws-config}"
+[[ -n "${AWS_CA_BUNDLE:-}" ]] && export AWS_CA_BUNDLE
+
+bucket="${AWS_S3_BUCKET_NAME:-}"
+[[ -n "${bucket}" ]] || error 'need AWS_S3_BUCKET_NAME or --bucket'
+dryrun="${AWS_DRYRUN:-false}"
 
 gpg_encrypt=false
 gpg_args=(--symmetric --cipher-algo "${GPG_CIPHER_ALGO:=aes256}" --batch)
-if [[ -n "${GPG_PASSPHRASE:=}" ]]; then
+if [[ -n "${GPG_PASSPHRASE:-}" ]]; then
     # Use passphrase-fd to avoid exposing passphrase in process list (argv)
     gpg_args+=(--passphrase-fd 3)
     gpg_encrypt=true

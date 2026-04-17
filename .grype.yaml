@@ -1,0 +1,116 @@
+# Grype ignore rules — unfixed findings with documented mitigations.
+# All entries are documented in SECURITY.md.
+# Review each entry when the Alpine package index is updated.
+
+ignore:
+  # python3: CVE-2025-13836 — no Alpine apk fix available.
+  - vulnerability: CVE-2025-13836
+    package:
+      name: python3
+      type: apk
+
+  # unzip: CVE-2008-0888 — no Alpine apk fix; only in zip compression path,
+  # not network-facing.
+  - vulnerability: CVE-2008-0888
+    package:
+      name: unzip
+      type: apk
+
+  # py3-urllib3 (apk): CVE-2025-66471 and CVE-2025-66418 — no Alpine apk fix.
+  # The runtime Python import resolves to the pip-installed urllib3 >= 2.6.3,
+  # which is patched. The apk copy is superseded and not used at runtime.
+  - vulnerability: CVE-2025-66471
+    package:
+      name: py3-urllib3
+      type: apk
+
+  - vulnerability: CVE-2025-66418
+    package:
+      name: py3-urllib3
+      type: apk
+
+  # py3-cryptography (apk): CVE-2026-26007 / GHSA-r6ph-v2qm-q3c2 — no Alpine
+  # apk fix. The runtime Python import resolves to pip-installed
+  # cryptography >= 46.0.5, which is patched. The apk copy is superseded.
+  - vulnerability: CVE-2026-26007
+    package:
+      name: py3-cryptography
+      type: apk
+
+  - vulnerability: GHSA-r6ph-v2qm-q3c2
+    package:
+      name: py3-cryptography
+      type: apk
+
+  # py3-pip (apk): CVE-2025-8869 and CVE-2026-1703 — no Alpine apk fix.
+  # The runtime pip resolves to pip-installed pip >= 25.3, which is patched.
+  # The apk copy is superseded and not used at runtime.
+  - vulnerability: CVE-2025-8869
+    package:
+      name: py3-pip
+      type: apk
+
+  - vulnerability: GHSA-4xh5-x5gv-qwph
+    package:
+      name: py3-pip
+      type: apk
+
+  - vulnerability: CVE-2026-1703
+    package:
+      name: py3-pip
+      type: apk
+
+  # wheel (pip-vendored inside pip): GHSA-8rrh-rw8j-w5fx / CVE-2026-24049 —
+  # pip internally vendors wheel for bootstrap; it is not callable by
+  # application code. The standalone wheel package is separately installed at
+  # >= 0.46.2 (patched).
+  - vulnerability: GHSA-8rrh-rw8j-w5fx
+    package:
+      name: wheel
+      type: python
+
+  # jaraco-context (pip-vendored inside pip): GHSA-58pv-8j8x-9vj2 —
+  # pip internally vendors jaraco.context; not callable by application code.
+  # The standalone jaraco.context package is separately installed at >= 6.1.0.
+  - vulnerability: GHSA-58pv-8j8x-9vj2
+    package:
+      name: jaraco-context
+      type: python
+
+  # busybox: CVE-2025-60876 — no Alpine apk fix available.
+  - vulnerability: CVE-2025-60876
+    package:
+      name: busybox
+      type: apk
+
+  # openssh: CVE-2026-35414 — no Alpine apk fix available.
+  - vulnerability: CVE-2026-35414
+    package:
+      name: openssh
+      type: apk
+
+  # openldap: CVE-2026-22185 — no Alpine apk fix; openldap is a transitive
+  # dependency.
+  - vulnerability: CVE-2026-22185
+    package:
+      name: openldap
+      type: apk
+
+  # gnupg: CVE-2022-3219 — no Alpine apk fix available.
+  - vulnerability: CVE-2022-3219
+    package:
+      name: gnupg
+      type: apk
+
+  # lz4: CVE-2025-62813 — no Alpine apk fix; lz4 is a transitive dependency.
+  - vulnerability: CVE-2025-62813
+    package:
+      name: lz4
+      type: apk
+
+  # py3-jmespath: CVE-2022-32511 — false positive; fixed in jmespath 1.0.1,
+  # installed version is 1.0.1-r4. Grype stale database entry.
+  - vulnerability: CVE-2022-32511
+    package:
+      name: py3-jmespath
+      type: apk

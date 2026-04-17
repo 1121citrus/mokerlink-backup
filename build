@@ -34,10 +34,10 @@
 #                       after --no-scan to keep the advisory scans.
 #   --advise [ADVISEMENTS]
 #                       Run advisory scans. Comma-delimited list:
-#                       'grype', 'scout', 'dive', 'all', 'none', or any
-#                       combination, e.g. 'grype,scout'. 'none' disables
-#                       all advisements (equivalent to --no-advise).
-#                       Default with no list given: 'grype,scout'.
+#                       'coverage', 'grype', 'scout', 'dive', 'all', 'none',
+#                       or any combination, e.g. 'grype,scout'. 'none'
+#                       disables all advisements (equivalent to --no-advise).
+#                       Default with no list given: 'all'.
 #                       Advisory scans are off by default.
 #   --advice [ADVISEMENTS]
 #                       Synonym for --advise.
@@ -68,9 +68,10 @@
 #   3. Test   — ./test/run-all against the locally loaded image
 #   4. Scan   — Trivy CRITICAL/HIGH image scan (blocking)
 #   5. Advise — multiple advisory scans (advisory only; never blocks the build)
-#              a) Grype   — full-severity scan
-#              b) Scout   — Docker Scout CVE scan
-#              c) Dive    — image layer analysis
+#              a) Grype    — full-severity scan
+#              b) Scout    — Docker Scout CVE scan
+#              c) Dive     — image layer analysis
+#              d) Coverage — kcov shell line coverage report
 #   6. Push   — multi-platform rebuild + push to registry (only with --push)
 #
 # EXAMPLES
@@ -99,6 +100,7 @@ PROVENANCE=true
 LINT=${BUILD_LINT:-true}
 TEST=${BUILD_TEST:-true}
 SCAN=${BUILD_SCAN:-true}
+ADVISE_COVERAGE=false
 ADVISE_GRYPE=false
 ADVISE_SCOUT=false
 ADVISE_DIVE=false
@@ -124,9 +126,12 @@ GRYPE_IMAGE=anchore/grype
 GRYPE_TAG=v0.87.0
 DIVE_IMAGE=wagoodman/dive
 DIVE_TAG=v0.13.1
+BATS_KCOV_IMAGE=1121citrus/bats-kcov
+BATS_KCOV_TAG=latest
 
 TRIVY_CACHE_VOLUME=mokerlink-backup-trivy-cache
 GRYPE_CACHE_VOLUME=mokerlink-backup-grype-cache
+GRYPE_DB_CACHE_DIR=/grype-db
 
 # ---------------------------------------------------------------------------
 # Helpers: cache control parsing
@@ -235,9 +240,10 @@ while [[ $# -gt 0 ]]; do
             if [[ $# -gt 1 && ! "$2" =~ ^-- ]]; then
                 advisements="$2"; shift
             else
-                advisements="grype,scout"
+                advisements="all"
             fi
             # Parse the comma-delimited list
+            ADVISE_COVERAGE=false
             ADVISE_GRYPE=false
             ADVISE_SCOUT=false
             ADVISE_DIVE=false
@@ -246,16 +252,18 @@ while [[ $# -gt 0 ]]; do
                 adv="${adv//[[:space:]]/}"
                 adv="${adv,,}"
                 case "$adv" in
-                    grype)  ADVISE_GRYPE=true ;;
-                    scout)  ADVISE_SCOUT=true ;;
-                    dive)   ADVISE_DIVE=true ;;
-                    all)    ADVISE_GRYPE=true; ADVISE_SCOUT=true; ADVISE_DIVE=true ;;
-                    none)   ADVISE_GRYPE=false; ADVISE_SCOUT=false; ADVISE_DIVE=false ;;
-                    *)      echo "Unknown advisement: $adv" >&2; exit 1 ;;
+                    coverage) ADVISE_COVERAGE=true ;;
+                    grype)    ADVISE_GRYPE=true ;;
+                    scout)    ADVISE_SCOUT=true ;;
+                    dive)     ADVISE_DIVE=true ;;
+                    all)      ADVISE_COVERAGE=true; ADVISE_GRYPE=true; ADVISE_SCOUT=true; ADVISE_DIVE=true ;;
+                    none)     ADVISE_COVERAGE=false; ADVISE_GRYPE=false; ADVISE_SCOUT=false; ADVISE_DIVE=false ;;
+                    *)        echo "Unknown advisement: $adv" >&2; exit 1 ;;
                 esac
             done
             ;;
         --no-advise)
+            ADVISE_COVERAGE=false
             ADVISE_GRYPE=false
             ADVISE_SCOUT=false
             ADVISE_DIVE=false
@@ -282,6 +290,7 @@ done
 
 # --no-scan implies --no-advise unless --advise was given explicitly.
 if [[ "${SCAN}" == "false" && "${_ADVISE_EXPLICIT}" == "false" ]]; then
+    ADVISE_COVERAGE=false
     ADVISE_GRYPE=false
     ADVISE_SCOUT=false
     ADVISE_DIVE=false
@@ -489,10 +498,16 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "${ADVISE_GRYPE}" == "true" ]]; then
     echo "==> Stage 5a: Advise (Grype) ${full_image}:${VERSION}" >&2
-    _grype_env=()
+    _grype_extra_env=()
     if [[ "${CACHE_SKIP_UPDATE_GRYPE}" == "true" ]]; then
         echo "    Grype DB update skipped for this run (--cache skip-update=grype)" >&2
-        _grype_env+=(-e GRYPE_DB_AUTO_UPDATE=false)
+        _grype_extra_env+=(-e GRYPE_DB_AUTO_UPDATE=false)
+    fi
+    _grype_vol=()
+    _grype_cfg=()
+    if [[ -f "${script_dir}/.grype.yaml" ]]; then
+        _grype_vol=(-v "${script_dir}/.grype.yaml:/.grype.yaml:ro")
+        _grype_cfg=(--config /.grype.yaml)
     fi
     _grype_archive=$(mktemp /tmp/grype-image-XXXXXX)
     # shellcheck disable=SC2064
@@ -504,9 +519,12 @@ if [[ "${ADVISE_GRYPE}" == "true" ]]; then
     fi
     _timed 300 docker run --rm \
         -v "${_grype_archive}:/scan.tar:ro" \
-        -v "${GRYPE_CACHE_VOLUME}:/root/.cache/grype" \
-        "${_grype_env[@]}" \
+        -e "GRYPE_DB_CACHE_DIR=${GRYPE_DB_CACHE_DIR}" \
+        -v "${GRYPE_CACHE_VOLUME}:${GRYPE_DB_CACHE_DIR}" \
+        "${_grype_vol[@]}" \
+        "${_grype_extra_env[@]}" \
         "${GRYPE_IMAGE}:${GRYPE_TAG}" \
+            "${_grype_cfg[@]}" \
             docker-archive:/scan.tar || {
         echo "    Grype scan timed out or failed (advisory only)" >&2
     }
@@ -547,6 +565,38 @@ if [[ "${ADVISE_DIVE}" == "true" ]]; then
             --ci \
             --ci-config /.dive-ci \
             "${full_image}:${VERSION}" || true
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 5d: Coverage (kcov — advisory, never blocks)
+#
+# Reruns the bats suite through kcov to produce a per-file line-coverage
+# report for src/.  Uses 1121citrus/bats-kcov (kcov + bats + jq pre-bundled).
+# Requires SYS_PTRACE; works on macOS Docker Desktop with the flags below.
+# ---------------------------------------------------------------------------
+if [[ "${ADVISE_COVERAGE}" == "true" ]]; then
+    echo "==> Stage 5d: Coverage" >&2
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        echo "[DRY RUN] docker run --rm --cap-add SYS_PTRACE --security-opt seccomp=unconfined \\" >&2
+        echo "[DRY RUN]   -v ${script_dir}:/code:ro -w /code ${BATS_KCOV_IMAGE}:${BATS_KCOV_TAG} bats-coverage <test files>" >&2
+    else
+        docker run --rm \
+            --cap-add SYS_PTRACE \
+            --security-opt seccomp=unconfined \
+            -v "${script_dir}:/code:ro" \
+            -w /code \
+            "${BATS_KCOV_IMAGE}:${BATS_KCOV_TAG}" \
+            bats-coverage \
+                test/01-build.bats \
+                test/02-mokerlink-backup.bats \
+                test/03-backup-required-vars.bats \
+                test/04-backup-success.bats \
+                test/05-backup-encryption.bats \
+                test/06-healthcheck.bats \
+                test/07-image-metadata.bats \
+            >&2 || echo "    Coverage run failed (advisory only)" >&2
+    fi
 fi
 
 # ---------------------------------------------------------------------------

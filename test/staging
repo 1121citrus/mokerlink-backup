@@ -25,7 +25,8 @@
 #   --image IMAGE        Docker image under test
 #   --scan               Run Trivy scan (default)
 #   --no-scan            Skip Trivy scan; implies --no-advise unless --advise is set
-#   --advise [LIST]      Run advisory scans: grype,scout,dive,all (default: grype,scout)
+#   --advise [LIST]      Run advisory scans: coverage,grype,scout,dive,all
+#                        (default: grype,scout)
 #   --no-advise          Disable advisory scans
 #   --yes                Skip interactive confirmation
 #   --help|-h            Show this help and exit
@@ -33,6 +34,7 @@
 set -euo pipefail
 
 _SCAN="${STAGING_SCAN:-true}"
+_ADVISE_COVERAGE=false
 _ADVISE_GRYPE="${STAGING_ADVISE:-true}"
 _ADVISE_SCOUT=true
 _ADVISE_DIVE=false
@@ -513,7 +515,7 @@ run_tests() {
 
     echo "Running staging tests for mokerlink-backup..."
     echo "=============================================="
-    echo "Scans: Trivy=${_SCAN} Grype=${_ADVISE_GRYPE} Scout=${_ADVISE_SCOUT} Dive=${_ADVISE_DIVE}"
+    echo "Scans: Trivy=${_SCAN} Grype=${_ADVISE_GRYPE} Scout=${_ADVISE_SCOUT} Dive=${_ADVISE_DIVE} Coverage=${_ADVISE_COVERAGE}"
     echo "=============================================="
 
     if [[ "${_SCAN}" == "true" ]]; then
@@ -535,13 +537,22 @@ run_tests() {
 
     if [[ "${_ADVISE_GRYPE}" == "true" ]]; then
         echo "==> Advise: Grype ${IMAGE}" >&2
+        _staging_grype_vol=()
+        _staging_grype_cfg=()
+        _staging_script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+        if [[ -f "${_staging_script_dir}/.grype.yaml" ]]; then
+            _staging_grype_vol=(-v "${_staging_script_dir}/.grype.yaml:/.grype.yaml:ro")
+            _staging_grype_cfg=(--config /.grype.yaml)
+        fi
         _grype_tar=$(mktemp /tmp/grype-scan-XXXXXX)
         trap 'rm -f "${_grype_tar}"' EXIT
         docker image save "${IMAGE}" -o "${_grype_tar}"
         docker run --rm \
             -v "${_grype_tar}:/scan.tar:ro" \
             -v "${GRYPE_CACHE_VOLUME}:/root/.cache/grype" \
+            "${_staging_grype_vol[@]}" \
             "${GRYPE_IMAGE}:${GRYPE_TAG}" \
+                "${_staging_grype_cfg[@]}" \
                 docker-archive:/scan.tar || true
         rm -f "${_grype_tar}"
         trap - EXIT
@@ -606,22 +617,25 @@ main() {
                 else
                     advisements="grype,scout"
                 fi
+                _ADVISE_COVERAGE=false
                 _ADVISE_GRYPE=false
                 _ADVISE_SCOUT=false
                 _ADVISE_DIVE=false
                 IFS=',' read -ra adv_list <<< "$advisements"
                 for adv in "${adv_list[@]}"; do
                     case "$adv" in
-                        grype)  _ADVISE_GRYPE=true ;;
-                        scout)  _ADVISE_SCOUT=true ;;
-                        dive)   _ADVISE_DIVE=true ;;
-                        all)    _ADVISE_GRYPE=true; _ADVISE_SCOUT=true; _ADVISE_DIVE=true ;;
-                        *)      echo "Unknown advisement: $adv" >&2; exit 1 ;;
+                        coverage) _ADVISE_COVERAGE=true ;;
+                        grype)    _ADVISE_GRYPE=true ;;
+                        scout)    _ADVISE_SCOUT=true ;;
+                        dive)     _ADVISE_DIVE=true ;;
+                        all)      _ADVISE_COVERAGE=true; _ADVISE_GRYPE=true; _ADVISE_SCOUT=true; _ADVISE_DIVE=true ;;
+                        *)        echo "Unknown advisement: $adv" >&2; exit 1 ;;
                     esac
                 done
                 ;;
             --no-advise)
                 _ADVISE_EXPLICIT=true
+                _ADVISE_COVERAGE=false
                 _ADVISE_GRYPE=false
                 _ADVISE_SCOUT=false
                 _ADVISE_DIVE=false
@@ -650,6 +664,7 @@ main() {
     done
 
     if [[ "${_SCAN}" == "false" && "${_ADVISE_EXPLICIT}" == "false" ]]; then
+        _ADVISE_COVERAGE=false
         _ADVISE_GRYPE=false
         _ADVISE_SCOUT=false
         _ADVISE_DIVE=false

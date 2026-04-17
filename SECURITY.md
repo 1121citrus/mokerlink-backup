@@ -53,11 +53,12 @@ connections to the switch and do not affect other SSH usage in the container.
 
 ## Credential handling
 
-| Credential | Env var (less secure) | File (recommended) |
-| --- | --- | --- |
-| Switch password | `MOKERLINK_PASSWORD` | `MOKERLINK_PASSWORD_FILE` (default: `/run/secrets/mokerlink-password`) |
-| GPG passphrase | `GPG_PASSPHRASE` | `GPG_PASSPHRASE_FILE` (default: `/run/secrets/gpg-passphrase`) |
-| AWS credentials | — | `AWS_CONFIG_FILE` (default: `/run/secrets/aws-config`) |
+| Credential | Env var (less secure) | File (recommended) | CLI flag |
+| --- | --- | --- | --- |
+| Switch password | `MOKERLINK_PASSWORD` | `MOKERLINK_PASSWORD_FILE` (default: `/run/secrets/mokerlink-password`) | `--password-file` |
+| GPG passphrase | `GPG_PASSPHRASE` | `GPG_PASSPHRASE_FILE` (default: `/run/secrets/gpg-passphrase`) | `--gpg-passphrase-file` |
+| AWS credentials | — | `AWS_CONFIG_FILE` (default: `/run/secrets/aws-config`) | `--aws-config` |
+| AWS CA bundle | `AWS_CA_BUNDLE` | — | `--aws-certificate` |
 
 **Prefer Docker secrets or read-only bind mounts over environment variables.**
 Environment variables are visible in `docker inspect` output, may be captured
@@ -159,7 +160,7 @@ docker buildx imagetools inspect 1121citrus/mokerlink-backup:<version> \
 
 Advisory scans are run with Grype and Docker Scout in addition to the gating
 Trivy scan.  The tables below reflect the state as of the last `build --advise
-all` run.
+all` run.  Grype ignores are tracked in `.grype.yaml`.
 
 ### Trivy (gating scan)
 

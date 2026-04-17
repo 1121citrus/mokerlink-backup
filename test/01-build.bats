@@ -51,6 +51,7 @@ setup() {
     [[ "${output}" != *"Stage 5a"* ]]
     [[ "${output}" != *"Stage 5b"* ]]
     [[ "${output}" != *"Stage 5c"* ]]
+    [[ "${output}" != *"Stage 5d"* ]]
 }
 
 @test "build --advise NONE disables all advisements" {
@@ -59,6 +60,7 @@ setup() {
     [[ "${output}" != *"Stage 5a"* ]]
     [[ "${output}" != *"Stage 5b"* ]]
     [[ "${output}" != *"Stage 5c"* ]]
+    [[ "${output}" != *"Stage 5d"* ]]
 }
 
 @test "build --advice none disables all advisements" {
@@ -67,6 +69,7 @@ setup() {
     [[ "${output}" != *"Stage 5a"* ]]
     [[ "${output}" != *"Stage 5b"* ]]
     [[ "${output}" != *"Stage 5c"* ]]
+    [[ "${output}" != *"Stage 5d"* ]]
 }
 
 @test "build --no-advise disables all advisements" {
@@ -75,13 +78,31 @@ setup() {
     [[ "${output}" != *"Stage 5a"* ]]
     [[ "${output}" != *"Stage 5b"* ]]
     [[ "${output}" != *"Stage 5c"* ]]
+    [[ "${output}" != *"Stage 5d"* ]]
 }
 
-@test "build --advise scout,dive enables Scout and Dive" {
+@test "build --advise coverage enables Coverage advisement stage" {
+    local output
+    output=$("${BUILD}" --advise coverage --dry-run --no-lint --no-test --no-scan 2>&1)
+    echo "output: ${output}"
+    [[ "${output}" == *"Stage 5d: Coverage"* ]]
+}
+
+@test "build --advise all enables all advisement stages" {
+    run "${BUILD}" --advise all --dry-run --no-lint --no-test --no-scan
+    [ "$status" -eq 0 ]
+    [[ "${output}" == *"Stage 5a: Advise (Grype)"* ]]
+    [[ "${output}" == *"Stage 5b: Advise (Scout)"* ]]
+    [[ "${output}" == *"Stage 5c: Advise (Dive)"* ]]
+    [[ "${output}" == *"Stage 5d: Coverage"* ]]
+}
+
+@test "build --advise scout,dive enables Scout and Dive but not Coverage" {
     run "${BUILD}" --advise scout,dive --dry-run --no-lint --no-test --no-scan
     [ "$status" -eq 0 ]
     [[ "${output}" == *"Stage 5b: Advise (Scout)"* ]]
     [[ "${output}" == *"Stage 5c: Advise (Dive)"* ]]
+    [[ "${output}" != *"Stage 5d"* ]]
 }
 
 @test "build --advise rejects unknown advisement" {
@@ -96,6 +117,7 @@ setup() {
     [[ "${output}" != *"Stage 5a"* ]]
     [[ "${output}" != *"Stage 5b"* ]]
     [[ "${output}" != *"Stage 5c"* ]]
+    [[ "${output}" != *"Stage 5d"* ]]
 }
 
 @test "build --cache reset=all resets Trivy DB" {
