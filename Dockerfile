@@ -40,7 +40,7 @@ LABEL org.opencontainers.image.title="mokerlink-backup" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
 # install required utilities and configure environment
-# hadolint ignore=DL3018,SC2261,SC3041,DL3059
+# hadolint ignore=DL3013,DL3018,SC2261,SC3041,DL3059
 RUN set -Eeux; \
     apk update && \
     apk upgrade --no-cache --no-interactive && \
@@ -58,9 +58,18 @@ RUN set -Eeux; \
         'pigz>2.8' \
         'pixz>1.0' \
         'py3-cryptography>44.0' \
+        'py3-pip>23.0' \
         'py3-urllib3>1.25' \
         'xz>5.6' \
         'zip>3.0' \
+        && \
+    pip3 install --no-cache-dir --break-system-packages \
+        'cryptography>=46.0.5' \
+        'jaraco.context>=6.1.0' \
+        'pip>=25.3' \
+        'urllib3>=2.6.3' \
+        'wheel>=0.46.2' \
+        'zipp>=3.19.1' \
         && \
     adduser \
         --disabled-password --gecos "" --shell "/sbin/nologin" \
