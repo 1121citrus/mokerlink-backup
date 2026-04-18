@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 
-# An application specific service to check mokerlink-backup health.
-# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# healthcheck — verify crond is running, the crontab is installed, and the
+# last backup succeeded within the configured maximum age.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-# 
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-# 
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# ENVIRONMENT
+#   BACKUP_SENTINEL_FILE   Path to the sentinel file written by `backup` on
+#                          success (default: /tmp/mokerlink-backup-last-success)
+#   BACKUP_MAX_AGE_SECONDS Maximum acceptable age of the sentinel file in
+#                          seconds (default: 172800 = 2 days).  If the
+#                          sentinel is older than this, healthcheck exits 1.
+#   DEBUG                  Enable debug tracing (default: false)
+#   ENV                    Env-file path (default: ~/.env)
 
 bindir=$(readlink -f "$(dirname "${0}")")
 export PATH=${bindir}:${PATH}
@@ -22,7 +21,7 @@ export PATH=${bindir}:${PATH}
 # shellcheck disable=SC1091
 source /usr/local/include/bash/common-functions
 
-# ~/.env is how the startup encodes arguments to be accessed by this command in cron job
+# startup writes ENV so healthcheck and backup share the same configuration.
 ENV=${ENV:-${HOME:-/root}/.env}
 # shellcheck disable=SC1090
 [[ -r "${ENV}" ]] && source "${ENV}"
@@ -31,11 +30,18 @@ set -o errexit -o errtrace -o nounset -o pipefail
 is_true "${DEBUG:-false}" && set -o xtrace -o verbose
 
 function has_cronjob_run() {
-    # Alpine's crond writes no structured execution log, so there is no
-    # lightweight way to determine when the job last ran without adding an
-    # external sentinel file.  Return true unconditionally; only cron
-    # misconfiguration (missing crond or crontab) is detected.
-    true
+    local sentinel="${BACKUP_SENTINEL_FILE:-/tmp/mokerlink-backup-last-success}"
+    # No sentinel yet: backup has not run since the container started.
+    # Treat as healthy — the first run is pending.
+    [[ -f "${sentinel}" ]] || return 0
+    local max_age="${BACKUP_MAX_AGE_SECONDS:-172800}"
+    local now mtime age
+    now=$(date +%s)
+    mtime=$(stat -c '%Y' "${sentinel}")
+    age=$(( now - mtime ))
+    if [[ "${age}" -gt "${max_age}" ]]; then
+        error "last successful backup is ${age}s old (BACKUP_MAX_AGE_SECONDS=${max_age})"
+    fi
 }
 
 function is_crond_running() {

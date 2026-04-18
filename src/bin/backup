@@ -48,6 +48,9 @@
 #   GPG_PASSPHRASE         GPG passphrase for symmetric encryption
 #   GPG_PASSPHRASE_FILE    Path to GPG passphrase file
 #                          (default: /run/secrets/gpg-passphrase)
+#   BACKUP_SENTINEL_FILE   Touched on success; read by healthcheck to verify
+#                          last backup succeeded
+#                          (default: /tmp/mokerlink-backup-last-success)
 #   DEBUG                  Enable debug tracing (default: false)
 #   ENV                    Env-file path (default: ~/.env)
 
@@ -298,5 +301,6 @@ info "upload checksum: '${shafile}' → '${shauri}'"
 aws s3 mv "${awsargs[@]}" "${shafile}" "${shauri}" 2>&1 | info || \
     error "aws s3 mv '${shafile}' failed"
 info "completed upload to S3 bucket '${bucket}'"
+touch "${BACKUP_SENTINEL_FILE:-/tmp/mokerlink-backup-last-success}"
 info "finish ${command}"
 exit 0

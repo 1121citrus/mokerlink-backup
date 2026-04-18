@@ -31,6 +31,11 @@
 #   MOKERLINK_USER         SSH username (default: remote-backup)
 #   TAILSCALE_HOST         Fallback hostname when MOKERLINK_HOST is unset
 #   TZ                     Timezone (default: UTC)
+#   BACKUP_SENTINEL_FILE   Path where `backup` writes its success sentinel;
+#                          read by `healthcheck`
+#                          (default: /tmp/mokerlink-backup-last-success)
+#   BACKUP_MAX_AGE_SECONDS Maximum age in seconds before healthcheck reports
+#                          unhealthy (default: 172800 = 2 days)
 
 bindir=$(readlink -f "$(dirname "${0}")")
 export PATH=${bindir}:${PATH}
@@ -86,6 +91,8 @@ export MOKERLINK_PASSWORD_FILE='$(__quote "${MOKERLINK_PASSWORD_FILE:-/run/secre
 export MOKERLINK_USER='$(__quote "${MOKERLINK_USER:-remote-backup}")'
 export TAILSCALE_HOST='$(__quote "${TAILSCALE_HOST:-}")'
 export TZ='$(__quote "${TZ:-UTC}")'
+export BACKUP_SENTINEL_FILE='$(__quote "${BACKUP_SENTINEL_FILE:-/tmp/mokerlink-backup-last-success}")'
+export BACKUP_MAX_AGE_SECONDS='$(__quote "${BACKUP_MAX_AGE_SECONDS:-172800}")'
 EOF
 clean-credentials() {
     sed -E 's/(GPG_PASSPHRASE|MOKERLINK_PASSWORD)='"'"'.*'"'"'$/\1='"'**REDACTED**'"'/' 
