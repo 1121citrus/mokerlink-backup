@@ -597,6 +597,7 @@ run_tests() {
                 test/05-backup-encryption.bats \
                 test/06-healthcheck.bats \
                 test/07-image-metadata.bats \
+                test/08-startup.bats \
             >&2 || echo "    Coverage run failed (advisory only)" >&2
     fi
 

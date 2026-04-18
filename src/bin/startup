@@ -1,26 +1,63 @@
 #!/usr/bin/env bash
 
-# An application specific service to create Mokerlink switch backups and copy them off site.
-# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# startup — container entrypoint: configure the environment and start crond.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-# 
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-# 
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   startup [options]
+#
+# OPTIONS
+#   -?,--help     Display this help text
+#   -v,--version  Display command version
+#
+# ENVIRONMENT
+#   AWS_S3_BUCKET_NAME     S3 bucket name (required)
+#   AWS_CONFIG_FILE        AWS config file (default: /run/secrets/aws-config)
+#   AWS_DRYRUN             Set 'true' to skip real S3 writes (default: false)
+#   COMPRESSION            Compression algorithm (default: none)
+#   CRON_EXPRESSION        Cron schedule expression (default: @daily)
+#   DEBUG                  Enable debug tracing (default: false)
+#   GPG_CIPHER_ALGO        GPG cipher algorithm (default: aes256)
+#   GPG_PASSPHRASE         GPG passphrase for symmetric encryption
+#   GPG_PASSPHRASE_FILE    Path to GPG passphrase file
+#                          (default: /run/secrets/gpg-passphrase)
+#   MOKERLINK_HOST         Switch hostname or IP (required)
+#   MOKERLINK_PASSWORD     Switch password
+#   MOKERLINK_PASSWORD_FILE
+#                          Path to switch password file
+#                          (default: /run/secrets/mokerlink-password)
+#   MOKERLINK_USER         SSH username (default: remote-backup)
+#   TAILSCALE_HOST         Fallback hostname when MOKERLINK_HOST is unset
+#   TZ                     Timezone (default: UTC)
 
 bindir=$(readlink -f "$(dirname "${0}")")
 export PATH=${bindir}:${PATH}
 
 # shellcheck disable=SC1091
 source /usr/local/include/bash/common-functions
+
+show_help() {
+    sed -n '/^# SYNOPSIS/,/^[^#]/p' "$0" \
+        | grep '^#' \
+        | sed 's/^# \{0,1\}//'
+}
+
+show_version() {
+    cat /usr/local/share/mokerlink-backup/version 2>/dev/null || echo "unknown"
+}
+
+# Handle --help and --version before service initialisation.
+for _startup_arg in "$@"; do
+    case "${_startup_arg}" in
+        -\?|--help)    show_help;    exit 0 ;;
+        -v|--version)  show_version; exit 0 ;;
+        --)            break ;;
+        -*)            error "unknown option: '${_startup_arg}'" ;;
+    esac
+done
+unset _startup_arg
 
 set -o errexit -o errtrace -o nounset -o pipefail
 if is_true "${DEBUG:-false}"; then set -o xtrace -o verbose; fi
