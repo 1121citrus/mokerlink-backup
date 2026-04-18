@@ -11,6 +11,7 @@ setup() {
     export WHEREAMI IMAGE
 
     # run_backup: extra args are passed to docker (before the image name).
+    # shellcheck disable=SC2317
     run_backup() {
         # shellcheck disable=SC2086
         docker run -i --rm ${DOCKER_RUN_ARGS:-} \
@@ -23,6 +24,7 @@ setup() {
 
     # run_backup_args: extra args are appended after the backup command name
     # (i.e., they are CLI arguments to backup, not to docker).
+    # shellcheck disable=SC2317
     run_backup_args() {
         local docker_args=()
         local cmd_args=()
@@ -123,6 +125,50 @@ setup() {
         -v "${WHEREAMI}/fixtures:/test/fixtures:ro" \
         -- \
         --gpg-passphrase-file /test/fixtures/gpg-passphrase
+    [ "$status" -eq 0 ]
+}
+
+@test "--host CLI option provides host when MOKERLINK_HOST is unset" {
+    run run_backup_args \
+        -e MOKERLINK_HOST= \
+        -e TAILSCALE_HOST= \
+        -e MOKERLINK_PASSWORD=foo \
+        -e AWS_S3_BUCKET_NAME=test-bucket \
+        -- \
+        --host fake-host
+    [ "$status" -eq 0 ]
+}
+
+@test "--user CLI option is accepted" {
+    run run_backup_args \
+        -e MOKERLINK_HOST=fake-host \
+        -e MOKERLINK_PASSWORD=foo \
+        -e AWS_S3_BUCKET_NAME=test-bucket \
+        -- \
+        --user remote-backup
+    [ "$status" -eq 0 ]
+}
+
+@test "--password CLI option provides password when MOKERLINK_PASSWORD is unset" {
+    run run_backup_args \
+        -e MOKERLINK_HOST=fake-host \
+        -e MOKERLINK_PASSWORD= \
+        -e MOKERLINK_PASSWORD_FILE=/nonexistent \
+        -e AWS_S3_BUCKET_NAME=test-bucket \
+        -- \
+        --password testpass
+    [ "$status" -eq 0 ]
+}
+
+@test "--password-file CLI option overrides MOKERLINK_PASSWORD_FILE" {
+    run run_backup_args \
+        -e MOKERLINK_HOST=fake-host \
+        -e MOKERLINK_PASSWORD= \
+        -e MOKERLINK_PASSWORD_FILE=/nonexistent \
+        -e AWS_S3_BUCKET_NAME=test-bucket \
+        -v "${WHEREAMI}/fixtures:/test/fixtures:ro" \
+        -- \
+        --password-file /test/fixtures/gpg-passphrase
     [ "$status" -eq 0 ]
 }
 

@@ -11,6 +11,14 @@
 # OPTIONS
 #   -?,--help              Display this help text
 #   -v,--version           Display command version
+#   --host HOST            Switch hostname or IP (env: MOKERLINK_HOST)
+#   --user USER            SSH username (env: MOKERLINK_USER;
+#                          default: remote-backup)
+#   --password PW          Switch password (env: MOKERLINK_PASSWORD;
+#                          prefer --password-file)
+#   --password-file FILE   Path to switch password file
+#                          (env: MOKERLINK_PASSWORD_FILE;
+#                          default: /run/secrets/mokerlink-password)
 #   --bucket BUCKET        S3 bucket name (env: AWS_S3_BUCKET_NAME)
 #   --aws-config FILE      AWS config file (env: AWS_CONFIG_FILE;
 #                          default: /run/secrets/aws-config)
@@ -24,6 +32,12 @@
 #   --dryrun               Dry-run S3 operations (env: AWS_DRYRUN=true)
 #
 # ENVIRONMENT
+#   MOKERLINK_HOST         Switch hostname or IP (required unless --host given)
+#   MOKERLINK_USER         SSH username (default: remote-backup)
+#   MOKERLINK_PASSWORD     Switch password (prefer MOKERLINK_PASSWORD_FILE)
+#   MOKERLINK_PASSWORD_FILE
+#                          Path to switch password file
+#                          (default: /run/secrets/mokerlink-password)
 #   AWS_S3_BUCKET_NAME     S3 bucket name (required unless --bucket given)
 #   AWS_CONFIG_FILE        AWS config file (default: /run/secrets/aws-config)
 #   AWS_CA_BUNDLE          Custom CA certificate bundle path
@@ -34,12 +48,6 @@
 #   GPG_PASSPHRASE         GPG passphrase for symmetric encryption
 #   GPG_PASSPHRASE_FILE    Path to GPG passphrase file
 #                          (default: /run/secrets/gpg-passphrase)
-#   MOKERLINK_HOST         Switch hostname or IP (required)
-#   MOKERLINK_USER         SSH username (default: remote-backup)
-#   MOKERLINK_PASSWORD     Switch password
-#   MOKERLINK_PASSWORD_FILE
-#                          Path to switch password file
-#                          (default: /run/secrets/mokerlink-password)
 #   DEBUG                  Enable debug tracing (default: false)
 #   ENV                    Env-file path (default: ~/.env)
 
@@ -67,6 +75,10 @@ show_version() {
 }
 
 # Parse CLI arguments; overrides corresponding environment variables.
+_cli_host=
+_cli_user=
+_cli_password=
+_cli_password_file=
 _cli_bucket=
 _cli_aws_config=
 _cli_aws_cert=
@@ -83,6 +95,22 @@ while [[ $# -gt 0 ]]; do
         -v|--version)
             show_version
             exit 0
+            ;;
+        --host)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            _cli_host="$2"; shift
+            ;;
+        --user)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            _cli_user="$2"; shift
+            ;;
+        --password)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            _cli_password="$2"; shift
+            ;;
+        --password-file)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            _cli_password_file="$2"; shift
             ;;
         --bucket)
             [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
@@ -121,6 +149,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Apply CLI overrides to environment variables.
+[[ -n "${_cli_host}" ]]               && export MOKERLINK_HOST="${_cli_host}"
+[[ -n "${_cli_user}" ]]               && export MOKERLINK_USER="${_cli_user}"
+[[ -n "${_cli_password}" ]]           && export MOKERLINK_PASSWORD="${_cli_password}"
+[[ -n "${_cli_password_file}" ]]      && export MOKERLINK_PASSWORD_FILE="${_cli_password_file}"
 [[ -n "${_cli_bucket}" ]]             && AWS_S3_BUCKET_NAME="${_cli_bucket}"
 [[ -n "${_cli_aws_config}" ]]         && AWS_CONFIG_FILE="${_cli_aws_config}"
 [[ -n "${_cli_aws_cert}" ]]           && AWS_CA_BUNDLE="${_cli_aws_cert}"
