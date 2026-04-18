@@ -124,18 +124,20 @@ _set_cache_targets() {
     for target in "${_tgts[@]}"; do
         case "${target}" in
             trivy)
-                [[ "${mode}" == "reset" ]]       && _CACHE_RESET_TRIVY=true
-                [[ "${mode}" == "skip-update" ]] && _CACHE_SKIP_UPDATE_TRIVY=true
+                if [[ "${mode}" == "reset" ]];       then _CACHE_RESET_TRIVY=true; fi
+                if [[ "${mode}" == "skip-update" ]]; then _CACHE_SKIP_UPDATE_TRIVY=true; fi
                 ;;
             grype)
-                [[ "${mode}" == "reset" ]]       && _CACHE_RESET_GRYPE=true
-                [[ "${mode}" == "skip-update" ]] && _CACHE_SKIP_UPDATE_GRYPE=true
+                if [[ "${mode}" == "reset" ]];       then _CACHE_RESET_GRYPE=true; fi
+                if [[ "${mode}" == "skip-update" ]]; then _CACHE_SKIP_UPDATE_GRYPE=true; fi
                 ;;
             all)
-                [[ "${mode}" == "reset" ]]       && {
-                    _CACHE_RESET_TRIVY=true; _CACHE_RESET_GRYPE=true; }
-                [[ "${mode}" == "skip-update" ]] && {
-                    _CACHE_SKIP_UPDATE_TRIVY=true; _CACHE_SKIP_UPDATE_GRYPE=true; }
+                if [[ "${mode}" == "reset" ]]; then
+                    _CACHE_RESET_TRIVY=true; _CACHE_RESET_GRYPE=true
+                fi
+                if [[ "${mode}" == "skip-update" ]]; then
+                    _CACHE_SKIP_UPDATE_TRIVY=true; _CACHE_SKIP_UPDATE_GRYPE=true
+                fi
                 ;;
             *) echo "Unknown cache target: ${target}" >&2; exit 1 ;;
         esac
