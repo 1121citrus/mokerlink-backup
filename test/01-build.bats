@@ -162,3 +162,31 @@ setup() {
     echo "output: ${output}"
     [[ "${output}" == *"--advise"* ]]
 }
+
+@test "test/staging --help lists --bucket option" {
+    local output
+    output=$("${STAGING}" --help 2>&1)
+    echo "output: ${output}"
+    [[ "${output}" == *"--bucket"* ]]
+}
+
+@test "test/staging --help lists --dryrun option" {
+    local output
+    output=$("${STAGING}" --help 2>&1)
+    echo "output: ${output}"
+    [[ "${output}" == *"--dryrun"* ]]
+}
+
+@test "test/staging --help lists --skip-e2e option" {
+    local output
+    output=$("${STAGING}" --help 2>&1)
+    echo "output: ${output}"
+    [[ "${output}" == *"--skip-e2e"* ]]
+}
+
+@test "test/staging --help lists --test option" {
+    local output
+    output=$("${STAGING}" --help 2>&1)
+    echo "output: ${output}"
+    [[ "${output}" == *"--test"* ]]
+}

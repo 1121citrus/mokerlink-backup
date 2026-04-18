@@ -1,38 +1,83 @@
 #!/usr/bin/env bash
 
-# mokerlink-backup: functional tests against a real Mokerlink switch.
+# test/staging — functional tests against a real Mokerlink switch and live AWS.
 #
 # Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# These tests exercise the mokerlink-backup CLI end-to-end with no stubs.
 # Tests that require a live switch are skipped (not failed) when
-# MOKERLINK_HOST is unset or credentials are unavailable.
+# MOKERLINK_HOST is unset or credentials are unavailable.  Tests that require
+# AWS are skipped when AWS_S3_BUCKET_NAME is unset or no credentials are found.
 #
-# Required environment (switch-dependent tests):
-#   MOKERLINK_HOST          hostname or IP of the Mokerlink switch
-#   MOKERLINK_USER          SSH username (default: remote-backup)
-#   MOKERLINK_PASSWORD      switch password, OR
-#   MOKERLINK_PASSWORD_FILE path to a file containing the password
+# SYNOPSIS
+#   test/staging [options] [IMAGE]
 #
-# Usage:
-#   test/staging [options] [image]
-#   IMAGE=1121citrus/mokerlink-backup:1.2.3 test/staging
-#   test/staging --no-scan 1121citrus/mokerlink-backup:1.2.3
-#   MOKERLINK_HOST=10.0.0.1 MOKERLINK_PASSWORD=secret test/staging <image>
+# OPTIONS
+#   IMAGE                     Docker image to test (positional; also --image)
+#   --image IMAGE             Docker image to test (env: IMAGE)
+#   --bucket BUCKET           S3 bucket for backup upload (env: BUCKET;
+#                             also AWS_S3_BUCKET_NAME)
+#   --aws-config FILE         AWS config file path
+#                             (env: AWS_CONFIG_FILE;
+#                             default: ~/.secrets/aws-config)
+#   --aws-credentials FILE    AWS credentials file path
+#                             (env: AWS_CREDENTIALS_FILE;
+#                             default: ~/.secrets/aws-credentials)
+#   --dryrun                  Enable dry-run; no real S3 writes
+#                             (env: DRYRUN; default: true for
+#                             non-test/staging buckets)
+#   --no-dryrun               Disable dry-run; allow live S3 writes
+#   --scan                    Run Trivy HIGH/CRITICAL scan on the image
+#                             (env: STAGING_SCAN; default: true)
+#   --no-scan                 Skip Trivy scan; implies --no-advise unless
+#                             --advise is set explicitly
+#   --advise [LIST]           Run advisory scans (default: grype,scout)
+#                             Values: coverage,grype,scout,dive,all,none
+#   --no-advise               Disable all advisory scans
+#   --skip-e2e                Skip end-to-end backup and cron tests
+#   --test TEST               Run only the named test function
+#   --yes                     Skip interactive confirmation prompt
+#   -h,--help                 Print this message and exit
 #
-# Options:
-#   --image IMAGE        Docker image under test
-#   --scan               Run Trivy scan (default)
-#   --no-scan            Skip Trivy scan; implies --no-advise unless --advise is set
-#   --advise [LIST]      Run advisory scans: coverage,grype,scout,dive,all
-#                        (default: grype,scout)
-#   --no-advise          Disable advisory scans
-#   --yes                Skip interactive confirmation
-#   --help|-h            Show this help and exit
+# ENVIRONMENT
+#   IMAGE                     Docker image to test
+#   BUCKET                    S3 bucket for backup upload (alias for
+#                             AWS_S3_BUCKET_NAME; service tests skipped if
+#                             neither is set)
+#   AWS_S3_BUCKET_NAME        S3 bucket (also settable via BUCKET)
+#   AWS_CONFIG_FILE           Path to AWS config file
+#                             (default: ~/.secrets/aws-config)
+#   AWS_CREDENTIALS_FILE      Path to AWS credentials file
+#                             (default: ~/.secrets/aws-credentials)
+#   AWS_ACCESS_KEY_ID /
+#   AWS_SECRET_ACCESS_KEY     Inline AWS credentials (alternative to
+#                             config/credentials files)
+#   DRYRUN                    true = dry-run (default for non-test/staging
+#                             buckets); false = live S3 writes
+#   MOKERLINK_HOST            Switch hostname or IP; switch tests skipped if
+#                             unset
+#   MOKERLINK_USER            SSH username (default: remote-backup)
+#   MOKERLINK_PASSWORD        Switch password
+#   MOKERLINK_PASSWORD_FILE   Path to switch password file
+#                             (default: ~/.secrets/mokerlink-password)
+#   COMPRESSION               Compression algorithm (default: none)
+#   STAGING_SCAN              true/false — controls Trivy scan (default: true)
+#   DOCKER_RUN_ARGS           Extra flags appended to every docker run
+#                             invocation
 
 set -euo pipefail
 
+# Support BUCKET / DRYRUN as short aliases matching project-wide env naming.
+[[ -n "${BUCKET:-}" && -z "${AWS_S3_BUCKET_NAME:-}" ]] && \
+    AWS_S3_BUCKET_NAME="${BUCKET}"
+[[ -n "${DRYRUN:-}" ]] && AWS_DRYRUN="${DRYRUN}"
+
+_BUCKET=
+_AWS_CONFIG=
+_AWS_CREDENTIALS=
+_DRYRUN=
+_SKIP_E2E=false
+_TEST_FILTER=
 _SCAN="${STAGING_SCAN:-true}"
 _ADVISE_COVERAGE=false
 _ADVISE_GRYPE="${STAGING_ADVISE:-true}"
@@ -54,7 +99,7 @@ TRIVY_CACHE_VOLUME=mokerlink-backup-staging-trivy-cache
 GRYPE_CACHE_VOLUME=mokerlink-backup-staging-grype-cache
 
 show_help() {
-    sed -n '/^# Usage:/,/^set -/p' "$0" \
+    sed -n '/^# SYNOPSIS/,/^[^#]/p' "$0" \
         | grep '^#' \
         | sed 's/^# \{0,1\}//'
 }
@@ -105,13 +150,17 @@ setup() {
         return 1
     fi
 
-    # Run the legacy backup script directly with staging credentials.
+    # Run the backup script directly with staging credentials.
     # stderr is merged with stdout so callers capture all log output.
     # shellcheck disable=SC2120  # "$@" is intentional: callers may pass extra docker flags
     run_backup() {
-        local aws_mounts=()
+        local aws_mounts=() aws_env=()
         [[ -r "${AWS_CONFIG_FILE:-}" ]] && \
             aws_mounts+=(-v "${AWS_CONFIG_FILE}:/run/secrets/aws-config:ro")
+        [[ -r "${AWS_CREDENTIALS_FILE:-}" ]] && {
+            aws_mounts+=(-v "${AWS_CREDENTIALS_FILE}:/run/secrets/aws-credentials:ro")
+            aws_env+=(-e "AWS_SHARED_CREDENTIALS_FILE=/run/secrets/aws-credentials")
+        }
         # shellcheck disable=SC2086
         docker run -i --rm ${DOCKER_RUN_ARGS:-} \
             -e "MOKERLINK_HOST=${MOKERLINK_HOST:-}" \
@@ -121,6 +170,7 @@ setup() {
             -e "AWS_DRYRUN=${AWS_DRYRUN:-false}" \
             -e "COMPRESSION=${COMPRESSION:-none}" \
             "${aws_mounts[@]}" \
+            "${aws_env[@]}" \
             "$@" \
             "${IMAGE}" /usr/local/bin/backup 2>&1
     }
@@ -128,9 +178,13 @@ setup() {
     # Start the full service container (startup → crond → backup) detached.
     # Prints the container ID to stdout; caller is responsible for stop and rm.
     run_service_detached() {
-        local aws_mounts=()
+        local aws_mounts=() aws_env=()
         [[ -r "${AWS_CONFIG_FILE:-}" ]] && \
             aws_mounts+=(-v "${AWS_CONFIG_FILE}:/run/secrets/aws-config:ro")
+        [[ -r "${AWS_CREDENTIALS_FILE:-}" ]] && {
+            aws_mounts+=(-v "${AWS_CREDENTIALS_FILE}:/run/secrets/aws-credentials:ro")
+            aws_env+=(-e "AWS_SHARED_CREDENTIALS_FILE=/run/secrets/aws-credentials")
+        }
         # shellcheck disable=SC2086
         docker run -d ${DOCKER_RUN_ARGS:-} \
             -e "MOKERLINK_HOST=${MOKERLINK_HOST:-}" \
@@ -140,6 +194,7 @@ setup() {
             -e "AWS_DRYRUN=${AWS_DRYRUN:-false}" \
             -e "COMPRESSION=${COMPRESSION:-none}" \
             "${aws_mounts[@]}" \
+            "${aws_env[@]}" \
             "$@" \
             "${IMAGE}"
     }
@@ -159,10 +214,11 @@ _switch_available() {
 }
 
 # _aws_available returns 0 when AWS_S3_BUCKET_NAME is set and at least one
-# form of AWS credentials is present (config file or access-key env vars).
+# form of AWS credentials is present.
 _aws_available() {
     [[ -n "${AWS_S3_BUCKET_NAME:-}" ]] && {
         [[ -r "${AWS_CONFIG_FILE:-/run/secrets/aws-config}" ]] || \
+        [[ -r "${AWS_CREDENTIALS_FILE:-}" ]]            || \
         [[ -n "${AWS_ACCESS_KEY_ID:-}" ]]
     }
 }
@@ -496,7 +552,7 @@ test_staging_cron_fires() {
 
 run_tests() {
     local passed=0
-    local tests=(
+    local _unit_tests=(
         test_staging_help
         test_staging_version
         test_staging_unknown_option
@@ -509,9 +565,20 @@ run_tests() {
         test_staging_no_running
         test_staging_format_raw
         test_staging_name_file
+    )
+    local _e2e_tests=(
         test_staging_backup_direct
         test_staging_cron_fires
     )
+
+    local tests=()
+    if [[ -n "${_TEST_FILTER}" ]]; then
+        tests=("${_TEST_FILTER}")
+    elif [[ "${_SKIP_E2E}" == "true" ]]; then
+        tests=("${_unit_tests[@]}")
+    else
+        tests=("${_unit_tests[@]}" "${_e2e_tests[@]}")
+    fi
 
     setup "${@}" || { echo "ERROR: Setup failed"; return 1; }
 
@@ -623,8 +690,32 @@ main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --image)
-                IMAGE="$2"
-                shift
+                IMAGE="$2"; shift
+                ;;
+            --bucket)
+                [[ $# -ge 2 ]] || { echo "option '${1}' requires an argument" >&2; exit 1; }
+                _BUCKET="$2"; shift
+                ;;
+            --aws-config)
+                [[ $# -ge 2 ]] || { echo "option '${1}' requires an argument" >&2; exit 1; }
+                _AWS_CONFIG="$2"; shift
+                ;;
+            --aws-credentials)
+                [[ $# -ge 2 ]] || { echo "option '${1}' requires an argument" >&2; exit 1; }
+                _AWS_CREDENTIALS="$2"; shift
+                ;;
+            --dryrun)
+                _DRYRUN=true
+                ;;
+            --no-dryrun)
+                _DRYRUN=false
+                ;;
+            --skip-e2e)
+                _SKIP_E2E=true
+                ;;
+            --test)
+                [[ $# -ge 2 ]] || { echo "option '${1}' requires an argument" >&2; exit 1; }
+                _TEST_FILTER="$2"; shift
                 ;;
             --scan)
                 _SCAN=true
@@ -693,18 +784,26 @@ main() {
         _ADVISE_DIVE=false
     fi
 
+    # Apply CLI overrides.
+    [[ -n "${_BUCKET}" ]]          && AWS_S3_BUCKET_NAME="${_BUCKET}"
+    [[ -n "${_AWS_CONFIG}" ]]      && AWS_CONFIG_FILE="${_AWS_CONFIG}"
+    [[ -n "${_AWS_CREDENTIALS}" ]] && AWS_CREDENTIALS_FILE="${_AWS_CREDENTIALS}"
+    [[ -n "${_DRYRUN}" ]]          && AWS_DRYRUN="${_DRYRUN}"
+
     # ── Preflight: evaluate what will actually be touched ─────────────────────
-    local image="${1:-${IMAGE:-<not set>}}"
+    local image="${IMAGE:-<not set>}"
     local bucket="${AWS_S3_BUCKET_NAME:-}"
     local pw_file="${MOKERLINK_PASSWORD_FILE:-"${HOME}/.secrets/mokerlink-password"}"
     local aws_cfg="${AWS_CONFIG_FILE:-"${HOME}/.secrets/aws-config"}"
+    local aws_creds="${AWS_CREDENTIALS_FILE:-"${HOME}/.secrets/aws-credentials"}"
 
     local will_touch_switch=false will_touch_aws=false
     [[ -n "${MOKERLINK_HOST:-}" ]] && \
         { [[ -n "${MOKERLINK_PASSWORD:-}" ]] || [[ -r "${pw_file}" ]]; } && \
         will_touch_switch=true
     [[ -n "${bucket}" ]] && \
-        { [[ -r "${aws_cfg}" ]] || [[ -n "${AWS_ACCESS_KEY_ID:-}" ]]; } && \
+        { [[ -r "${aws_cfg}" ]] || [[ -r "${aws_creds}" ]] || \
+          [[ -n "${AWS_ACCESS_KEY_ID:-}" ]]; } && \
         will_touch_aws=true
 
     # ── Warning header ────────────────────────────────────────────────────────
@@ -740,6 +839,8 @@ main() {
 
     if "${will_touch_aws}"; then
         echo "  S3:       s3://${bucket}"
+        [[ -r "${aws_cfg}" ]]   && echo "  Config:   ${aws_cfg}"
+        [[ -r "${aws_creds}" ]] && echo "  Creds:    ${aws_creds}"
         if [[ "${AWS_DRYRUN:-false}" == "true" ]]; then
             echo "  Dry-run:  true — no files will be written to S3"
         else
@@ -748,6 +849,8 @@ main() {
     else
         echo "  S3:       not configured — service tests will be skipped"
     fi
+    [[ "${_SKIP_E2E}" == "true" ]] && echo "  Skip e2e: true"
+    [[ -n "${_TEST_FILTER}" ]]     && echo "  Filter:   ${_TEST_FILTER}"
     echo ""
 
     if "${caution_bucket}"; then
