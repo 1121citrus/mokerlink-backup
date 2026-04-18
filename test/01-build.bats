@@ -149,6 +149,13 @@ setup() {
     [[ "${output}" == *"Trivy DB update skipped"* ]]
 }
 
+@test "test/staging --help lists --cache option" {
+    local output
+    output=$("${STAGING}" --help 2>&1)
+    echo "output: ${output}"
+    [[ "${output}" == *"--cache CACHE_RULES"* ]]
+}
+
 @test "test/staging --help lists --scan option" {
     local output
     output=$("${STAGING}" --help 2>&1)

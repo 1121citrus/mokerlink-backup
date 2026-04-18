@@ -43,6 +43,9 @@
 #   --advise [LIST]           Run advisory scans (default: grype,scout)
 #                             Values: coverage,grype,scout,dive,all,none
 #   --no-advise               Disable all advisory scans
+#   --cache CACHE_RULES       One-run cache controls for scanner DBs.
+#                             Rule format: 'reset=<targets>;skip-update=<targets>'
+#                             Targets: trivy, grype, all (comma-delimited)
 #   --skip-e2e                Skip end-to-end backup and cron tests
 #   --test TEST               Run only the named test function
 #   --yes                     Skip interactive confirmation prompt
@@ -97,6 +100,10 @@ _ADVISE_GRYPE="${STAGING_ADVISE:-true}"
 _ADVISE_SCOUT=true
 _ADVISE_DIVE=false
 _ADVISE_EXPLICIT=false
+_CACHE_RESET_TRIVY=false
+_CACHE_RESET_GRYPE=false
+_CACHE_SKIP_UPDATE_TRIVY=false
+_CACHE_SKIP_UPDATE_GRYPE=false
 _YES=false
 
 TRIVY_IMAGE=aquasec/trivy
@@ -110,6 +117,54 @@ BATS_KCOV_TAG=latest
 
 TRIVY_CACHE_VOLUME=mokerlink-backup-staging-trivy-cache
 GRYPE_CACHE_VOLUME=mokerlink-backup-staging-grype-cache
+
+_set_cache_targets() {
+    local mode="$1" targets_csv="$2" target
+    IFS=',' read -ra _tgts <<< "${targets_csv,,}"
+    for target in "${_tgts[@]}"; do
+        case "${target}" in
+            trivy)
+                [[ "${mode}" == "reset" ]]       && _CACHE_RESET_TRIVY=true
+                [[ "${mode}" == "skip-update" ]] && _CACHE_SKIP_UPDATE_TRIVY=true
+                ;;
+            grype)
+                [[ "${mode}" == "reset" ]]       && _CACHE_RESET_GRYPE=true
+                [[ "${mode}" == "skip-update" ]] && _CACHE_SKIP_UPDATE_GRYPE=true
+                ;;
+            all)
+                [[ "${mode}" == "reset" ]]       && {
+                    _CACHE_RESET_TRIVY=true; _CACHE_RESET_GRYPE=true; }
+                [[ "${mode}" == "skip-update" ]] && {
+                    _CACHE_SKIP_UPDATE_TRIVY=true; _CACHE_SKIP_UPDATE_GRYPE=true; }
+                ;;
+            *) echo "Unknown cache target: ${target}" >&2; exit 1 ;;
+        esac
+    done
+}
+
+_parse_cache_rules() {
+    local rules="$1" entry key value
+    IFS=';' read -ra _rules <<< "${rules}"
+    for entry in "${_rules[@]}"; do
+        key="${entry%%=*}"; value="${entry#*=}"
+        key="${key,,}"; key="${key// /}"; value="${value// /}"
+        if [[ "${entry}" != *=* || -z "${key}" || -z "${value}" ]]; then
+            echo "Invalid --cache rule: ${entry}" >&2; exit 1
+        fi
+        case "${key}" in
+            reset|skip-update) _set_cache_targets "${key}" "${value}" ;;
+            *) echo "Unknown --cache rule key: ${key}" >&2; exit 1 ;;
+        esac
+    done
+}
+
+_reset_cache_db() {
+    local volume_name="$1"
+    docker run --rm \
+        -v "${volume_name}:/cache" \
+        alpine:3.21 \
+        sh -c "rm -rf /cache/* && mkdir -p /cache"
+}
 
 show_help() {
     sed -n '/^# SYNOPSIS/,/^[^#]/p' "$0" \
@@ -630,19 +685,36 @@ run_tests() {
     echo "Scans: Trivy=${_SCAN} Grype=${_ADVISE_GRYPE} Scout=${_ADVISE_SCOUT} Dive=${_ADVISE_DIVE} Coverage=${_ADVISE_COVERAGE}"
     echo "=============================================="
 
+    if [[ "${_CACHE_RESET_TRIVY}" == "true" ]]; then
+        echo "==> Cache: reset Trivy DB" >&2
+        _reset_cache_db "${TRIVY_CACHE_VOLUME}"
+    fi
+    if [[ "${_CACHE_RESET_GRYPE}" == "true" ]]; then
+        echo "==> Cache: reset Grype DB" >&2
+        _reset_cache_db "${GRYPE_CACHE_VOLUME}"
+    fi
+
     if [[ "${_SCAN}" == "true" ]]; then
         echo "==> Scan: Trivy ${IMAGE}" >&2
         _trivy_tar=$(mktemp /tmp/trivy-scan-XXXXXX)
         trap 'rm -f "${_trivy_tar}"' EXIT
         docker image save "${IMAGE}" -o "${_trivy_tar}"
+        local _trivy_extra_flags=()
+        if [[ "${_CACHE_SKIP_UPDATE_TRIVY}" == "true" ]]; then
+            echo "    Trivy DB update skipped for this run (--cache skip-update=trivy)" >&2
+            _trivy_extra_flags+=(--skip-db-update --skip-java-db-update)
+        fi
         # shellcheck disable=SC2215
         docker run --rm \
             -v "${_trivy_tar}:/scan.tar:ro" \
             -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
             "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
+                --quiet \
+                --no-progress \
                 --exit-code 1 \
                 --ignore-unfixed \
                 --severity HIGH,CRITICAL \
+                "${_trivy_extra_flags[@]}" \
                 --input /scan.tar
         rm -f "${_trivy_tar}"
         trap - EXIT
@@ -652,10 +724,15 @@ run_tests() {
         echo "==> Advise: Grype ${IMAGE}" >&2
         _staging_grype_vol=()
         _staging_grype_cfg=()
+        _staging_grype_extra_env=()
         _staging_script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
         if [[ -f "${_staging_script_dir}/.grype.yaml" ]]; then
             _staging_grype_vol=(-v "${_staging_script_dir}/.grype.yaml:/.grype.yaml:ro")
             _staging_grype_cfg=(--config /.grype.yaml)
+        fi
+        if [[ "${_CACHE_SKIP_UPDATE_GRYPE}" == "true" ]]; then
+            echo "    Grype DB update skipped for this run (--cache skip-update=grype)" >&2
+            _staging_grype_extra_env+=(-e GRYPE_DB_AUTO_UPDATE=false)
         fi
         _grype_tar=$(mktemp /tmp/grype-scan-XXXXXX)
         trap 'rm -f "${_grype_tar}"' EXIT
@@ -664,6 +741,7 @@ run_tests() {
             -v "${_grype_tar}:/scan.tar:ro" \
             -v "${GRYPE_CACHE_VOLUME}:/root/.cache/grype" \
             "${_staging_grype_vol[@]}" \
+            "${_staging_grype_extra_env[@]}" \
             "${GRYPE_IMAGE}:${GRYPE_TAG}" \
                 "${_staging_grype_cfg[@]}" \
                 docker-archive:/scan.tar || true
@@ -813,6 +891,11 @@ main() {
                 _ADVISE_GRYPE=false
                 _ADVISE_SCOUT=false
                 _ADVISE_DIVE=false
+                ;;
+            --cache)
+                [[ $# -ge 2 ]] || {
+                    echo "option '${1}' requires an argument" >&2; exit 1; }
+                _parse_cache_rules "$2"; shift
                 ;;
             --yes)
                 _YES=true
