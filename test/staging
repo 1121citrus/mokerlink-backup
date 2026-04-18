@@ -47,6 +47,8 @@ GRYPE_IMAGE=anchore/grype
 GRYPE_TAG=v0.87.0
 DIVE_IMAGE=wagoodman/dive
 DIVE_TAG=v0.13.1
+BATS_KCOV_IMAGE=1121citrus/bats-kcov
+BATS_KCOV_TAG=latest
 
 TRIVY_CACHE_VOLUME=mokerlink-backup-staging-trivy-cache
 GRYPE_CACHE_VOLUME=mokerlink-backup-staging-grype-cache
@@ -576,6 +578,26 @@ run_tests() {
                 /scan.tar || true
         rm -f "${_dive_tar}"
         trap - EXIT
+    fi
+
+    if [[ "${_ADVISE_COVERAGE}" == "true" ]]; then
+        echo "==> Advise: Coverage" >&2
+        _coverage_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+        docker run --rm \
+            --cap-add SYS_PTRACE \
+            --security-opt seccomp=unconfined \
+            -v "${_coverage_root}:/code:ro" \
+            -w /code \
+            "${BATS_KCOV_IMAGE}:${BATS_KCOV_TAG}" \
+            bats-coverage \
+                test/01-build.bats \
+                test/02-mokerlink-backup.bats \
+                test/03-backup-required-vars.bats \
+                test/04-backup-success.bats \
+                test/05-backup-encryption.bats \
+                test/06-healthcheck.bats \
+                test/07-image-metadata.bats \
+            >&2 || echo "    Coverage run failed (advisory only)" >&2
     fi
 
     echo "=============================================="
