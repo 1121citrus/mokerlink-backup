@@ -15,6 +15,15 @@
 # OPTIONS
 #   IMAGE                     Docker image to test (positional; also --image)
 #   --image IMAGE             Docker image to test (env: IMAGE)
+#   --host HOST               Switch hostname or IP
+#                             (env: MOKERLINK_HOST)
+#   --user USER               SSH username (env: MOKERLINK_USER;
+#                             default: remote-backup)
+#   --password PW             Switch password (env: MOKERLINK_PASSWORD;
+#                             prefer --password-file)
+#   --password-file FILE      Path to switch password file
+#                             (env: MOKERLINK_PASSWORD_FILE;
+#                             default: ~/.secrets/mokerlink-password)
 #   --bucket BUCKET           S3 bucket for backup upload (env: BUCKET;
 #                             also AWS_S3_BUCKET_NAME)
 #   --aws-config FILE         AWS config file path
@@ -72,6 +81,10 @@ set -euo pipefail
     AWS_S3_BUCKET_NAME="${BUCKET}"
 [[ -n "${DRYRUN:-}" ]] && AWS_DRYRUN="${DRYRUN}"
 
+_HOST=
+_USER=
+_PASSWORD=
+_PASSWORD_FILE=
 _BUCKET=
 _AWS_CONFIG=
 _AWS_CREDENTIALS=
@@ -282,6 +295,34 @@ test_staging_all_excluded() {
         echo "PASS '${FUNCNAME[0]}': exits non-zero when all configs excluded"
     else
         echo "FAIL '${FUNCNAME[0]}': should have exited non-zero"
+        return 1
+    fi
+}
+
+# ── backup-script CLI tests (switch/AWS-independent) ────────────────────────
+# These invoke /usr/local/bin/backup directly; no switch or AWS credentials
+# are needed.  They verify CLI option parsing and required-variable guards.
+
+test_staging_backup_help() {
+    local output result=0
+    output=$(docker run --rm "${IMAGE}" /usr/local/bin/backup --help 2>&1) || result=$?
+    if [[ ${result} -eq 0 ]] && echo "${output}" | grep -q 'Usage:'; then
+        echo "PASS '${FUNCNAME[0]}': backup --help exits 0 and prints usage"
+    else
+        echo "FAIL '${FUNCNAME[0]}': backup --help failed (exit=${result})"
+        return 1
+    fi
+}
+
+test_staging_backup_no_bucket() {
+    # Run backup with no AWS_S3_BUCKET_NAME — must fail before touching the
+    # switch or AWS; exercises the required-variable guard in backup.
+    local result=0
+    docker run --rm "${IMAGE}" /usr/local/bin/backup > /dev/null 2>&1 || result=$?
+    if [[ ${result} -ne 0 ]]; then
+        echo "PASS '${FUNCNAME[0]}': backup without bucket exits non-zero"
+    else
+        echo "FAIL '${FUNCNAME[0]}': should have exited non-zero without bucket"
         return 1
     fi
 }
@@ -558,6 +599,8 @@ run_tests() {
         test_staging_unknown_option
         test_staging_format_invalid
         test_staging_all_excluded
+        test_staging_backup_help
+        test_staging_backup_no_bucket
         test_staging_default_tar
         test_staging_running_only
         test_staging_startup_only
@@ -592,6 +635,7 @@ run_tests() {
         _trivy_tar=$(mktemp /tmp/trivy-scan-XXXXXX)
         trap 'rm -f "${_trivy_tar}"' EXIT
         docker image save "${IMAGE}" -o "${_trivy_tar}"
+        # shellcheck disable=SC2215
         docker run --rm \
             -v "${_trivy_tar}:/scan.tar:ro" \
             -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
@@ -692,6 +736,22 @@ main() {
             --image)
                 IMAGE="$2"; shift
                 ;;
+            --host)
+                [[ $# -ge 2 ]] || { echo "option '${1}' requires an argument" >&2; exit 1; }
+                _HOST="$2"; shift
+                ;;
+            --user)
+                [[ $# -ge 2 ]] || { echo "option '${1}' requires an argument" >&2; exit 1; }
+                _USER="$2"; shift
+                ;;
+            --password)
+                [[ $# -ge 2 ]] || { echo "option '${1}' requires an argument" >&2; exit 1; }
+                _PASSWORD="$2"; shift
+                ;;
+            --password-file)
+                [[ $# -ge 2 ]] || { echo "option '${1}' requires an argument" >&2; exit 1; }
+                _PASSWORD_FILE="$2"; shift
+                ;;
             --bucket)
                 [[ $# -ge 2 ]] || { echo "option '${1}' requires an argument" >&2; exit 1; }
                 _BUCKET="$2"; shift
@@ -785,6 +845,10 @@ main() {
     fi
 
     # Apply CLI overrides.
+    [[ -n "${_HOST}" ]]            && MOKERLINK_HOST="${_HOST}"
+    [[ -n "${_USER}" ]]            && MOKERLINK_USER="${_USER}"
+    [[ -n "${_PASSWORD}" ]]        && MOKERLINK_PASSWORD="${_PASSWORD}"
+    [[ -n "${_PASSWORD_FILE}" ]]   && MOKERLINK_PASSWORD_FILE="${_PASSWORD_FILE}"
     [[ -n "${_BUCKET}" ]]          && AWS_S3_BUCKET_NAME="${_BUCKET}"
     [[ -n "${_AWS_CONFIG}" ]]      && AWS_CONFIG_FILE="${_AWS_CONFIG}"
     [[ -n "${_AWS_CREDENTIALS}" ]] && AWS_CREDENTIALS_FILE="${_AWS_CREDENTIALS}"

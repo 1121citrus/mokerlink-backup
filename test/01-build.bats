@@ -163,6 +163,20 @@ setup() {
     [[ "${output}" == *"--advise"* ]]
 }
 
+@test "test/staging --help lists --host option" {
+    local output
+    output=$("${STAGING}" --help 2>&1)
+    echo "output: ${output}"
+    [[ "${output}" == *"--host"* ]]
+}
+
+@test "test/staging --help lists --password-file option" {
+    local output
+    output=$("${STAGING}" --help 2>&1)
+    echo "output: ${output}"
+    [[ "${output}" == *"--password-file"* ]]
+}
+
 @test "test/staging --help lists --bucket option" {
     local output
     output=$("${STAGING}" --help 2>&1)
