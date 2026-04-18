@@ -111,7 +111,7 @@ teardown() {
 
 @test "archive contains running-config-backup.xml" {
     TEST_TMPDIR=$(mktemp -d)
-    chmod o+w "${TEST_TMPDIR}"
+    chmod o+wx "${TEST_TMPDIR}"
     run_backup -e COMPRESSION=none -v "${TEST_TMPDIR}:/output" > /dev/null
     local tarfile
     tarfile=$(find "${TEST_TMPDIR}" -name '*.tar' | head -1)
@@ -124,7 +124,7 @@ teardown() {
 
 @test "archive contains startup-config-backup.xml" {
     TEST_TMPDIR=$(mktemp -d)
-    chmod o+w "${TEST_TMPDIR}"
+    chmod o+wx "${TEST_TMPDIR}"
     run_backup -e COMPRESSION=none -v "${TEST_TMPDIR}:/output" > /dev/null
     local tarfile
     tarfile=$(find "${TEST_TMPDIR}" -name '*.tar' | head -1)
@@ -136,7 +136,7 @@ teardown() {
 
 @test "archive contains backup-config-backup.xml" {
     TEST_TMPDIR=$(mktemp -d)
-    chmod o+w "${TEST_TMPDIR}"
+    chmod o+wx "${TEST_TMPDIR}"
     run_backup -e COMPRESSION=none -v "${TEST_TMPDIR}:/output" > /dev/null
     local tarfile
     tarfile=$(find "${TEST_TMPDIR}" -name '*.tar' | head -1)

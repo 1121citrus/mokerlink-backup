@@ -11,7 +11,7 @@ setup() {
     export WHEREAMI IMAGE
 
     # Run mokerlink-backup; extra docker flags go before IMAGE.
-    # shellcheck disable=SC2120,SC2317
+    # shellcheck disable=SC2120,SC2317,SC2329
     run_mokerlink_backup() {
         # shellcheck disable=SC2086
         docker run -i --rm ${DOCKER_RUN_ARGS:-} \
@@ -25,7 +25,7 @@ setup() {
     }
 
     # Run mokerlink-backup passing CLI arguments to the command (not to docker).
-    # shellcheck disable=SC2317
+    # shellcheck disable=SC2317,SC2329
     run_mokerlink_backup_args() {
         local cmd_args=("$@")
         # shellcheck disable=SC2086
@@ -101,7 +101,7 @@ teardown() {
 
 @test "name file is written with expected filename" {
     TEST_TMPDIR=$(mktemp -d)
-    chmod o+w "${TEST_TMPDIR}"
+    chmod o+wx "${TEST_TMPDIR}"
     run run_mokerlink_backup \
         -e MOKERLINK_BACKUP_NAME_FILE=/name/result \
         -v "${TEST_TMPDIR}:/name"
