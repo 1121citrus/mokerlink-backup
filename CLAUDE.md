@@ -37,6 +37,12 @@
   project directory tree. Prohibited without explicit user confirmation:
   pushing Docker images, pushing to git remotes, publishing packages,
   network writes, or any modification of shared or external state.
+- **NEVER merge pull requests:** `gh pr merge`, pushing to `origin`,
+  and any GitHub API call that merges or modifies a PR's merge state are
+  strictly forbidden without explicit user instruction. When asked to
+  "address" or "fix" open PRs, apply the changes to the local `dev`
+  branch only. All changes must pass local QA and staging tests before
+  the user pushes to `origin`.
 
 ## Disabling Extended Thinking
 
