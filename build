@@ -2,8 +2,8 @@
 # shellcheck shell=bash
 
 # -- GENERATED -- do not edit directly.
-# Template: src/build/generate @ 5879649
-# Generated: 2026-04-19T22:28:37Z
+# Template: src/build/generate @ 167cac9
+# Generated: 2026-04-19T22:45:38Z
 # Regenerate: bin/build-generate mokerlink-backup
 
 # build — local CI equivalent for mokerlink-backup.
@@ -113,9 +113,9 @@ set -euo pipefail
 
 # -- GENERATED metadata (informational; enforcement is in CI) --
 # shellcheck disable=SC2034
-GENERATED_AT="2026-04-19T22:28:37Z"
+GENERATED_AT="2026-04-19T22:45:38Z"
 # shellcheck disable=SC2034
-GENERATED_FROM_SHA="5879649"
+GENERATED_FROM_SHA="167cac9"
 
 # ---------------------------------------------------------------------------
 # Defaults — may be overridden by environment variables or CLI flags.
@@ -366,12 +366,21 @@ _timed() {
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
+_require_value() {
+    local option="$1"
+    local value="${2:-}"
+    if [[ -z "${value}" || "${value}" == --* ]]; then
+        echo "${option} requires a value" >&2
+        exit 1
+    fi
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --push)             PUSH=true ;;
-        --version)          VERSION="$2"; shift ;;
-        --platform)         PLATFORMS="$2"; shift ;;
-        --registry)         REGISTRY="$2"; shift ;;
+        --version)          _require_value "$1" "${2:-}"; VERSION="$2"; shift ;;
+        --platform)         _require_value "$1" "${2:-}"; PLATFORMS="$2"; shift ;;
+        --registry)         _require_value "$1" "${2:-}"; REGISTRY="$2"; shift ;;
         --no-sbom)          SBOM=false ;;
         --no-provenance)    PROVENANCE=false ;;
         --no-lint)          LINT=false ;;
@@ -474,6 +483,14 @@ fi
 if [[ "${CACHE_RESET_GRYPE}" == "true" ]]; then
     echo "==> Cache: reset Grype DB" >&2
     reset_cache_db "${GRYPE_CACHE_VOLUME}"
+fi
+
+if [[ "${CACHE_SKIP_UPDATE_TRIVY}" == "true" ]]; then
+    echo "    Trivy DB update skipped (--cache skip-update=trivy)" >&2
+fi
+
+if [[ "${CACHE_SKIP_UPDATE_GRYPE}" == "true" ]]; then
+    echo "    Grype DB update skipped (--cache skip-update=grype)" >&2
 fi
 
 echo "Image:     ${full_image}:${VERSION}" >&2
@@ -610,8 +627,6 @@ if [[ "${SCAN}" == "true" ]]; then
                 echo "    Warning: could not initialize Trivy DB cache; scan may be slow" >&2
             fi
         fi
-    else
-        echo "    Trivy DB update skipped (--cache skip-update=trivy)" >&2
     fi
 fi
 
