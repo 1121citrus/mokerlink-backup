@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# healthcheck — verify crond is running, the crontab is installed, and the
+# healthcheck — verify supercronic is running, the crontab is installed, and the
 # last backup succeeded within the configured maximum age.
 #
 # Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
@@ -47,12 +47,12 @@ function has_cronjob_run() {
 function is_crond_running() {
     # pidof is provided by busybox on Alpine; pgrep (procps) is the fallback
     # for images where pidof is absent or restricted.
-    if pidof crond >/dev/null 2>&1; then
+    if pidof supercronic >/dev/null 2>&1; then
         return 0
-    elif pgrep -q crond; then
+    elif pgrep -q supercronic; then
         return 0
     else
-        error crond is not running
+        error supercronic is not running
     fi
 }
 

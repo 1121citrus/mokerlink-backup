@@ -26,6 +26,7 @@ ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_DATE=unknown
 ARG UID=10001
+ARG SUPERCRONIC_VERSION=v0.2.44
 
 # OCI image annotations (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
 LABEL org.opencontainers.image.title="mokerlink-backup" \
@@ -63,6 +64,13 @@ RUN set -Eeux; \
         'xz>5.6' \
         'zip>3.0' \
         && \
+    echo "[INFO] installing supercronic ${SUPERCRONIC_VERSION}" \
+    && SUPERCRONIC_ARCH="$(uname -m \
+            | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
+    && wget -qO /usr/local/bin/supercronic \
+            "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${SUPERCRONIC_ARCH}" \
+    && chmod 0755 /usr/local/bin/supercronic \
+    && \
     pip3 install --no-cache-dir --break-system-packages \
         'cryptography>=46.0.5' \
         'jaraco.context>=6.1.0' \
@@ -79,6 +87,7 @@ RUN set -Eeux; \
         /home/mokerlink-backup/.ssh && \
     install -m 0600 -o mokerlink-backup /dev/null \
         /home/mokerlink-backup/.gnupg/pubring.kbx && \
+    rm -f /var/spool/cron/crontabs && \
     install -d -m 0755 -o mokerlink-backup /var/spool/cron/crontabs && \
     mkdir -pv /usr/local/include/bash && \
     ln -sf /usr/local/bin/common-functions /usr/local/include/bash/common-functions && \

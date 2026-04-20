@@ -1,0 +1,12 @@
+# .trivyignore — unfixable CVEs suppressed from the gating Trivy scan.
+#
+# All entries below have been reviewed and are unfixable at this time.
+# Each is documented in SECURITY.md with the rationale and a tracking reference.
+#
+# ── supercronic: Go stdlib 1.26.1 (needs 1.26.2) ────────────────────────────
+# supercronic v0.2.44 is the latest release and is built with Go 1.26.1.
+# The upstream project has not yet published a release compiled with Go 1.26.2.
+# Tracked: https://github.com/aptible/supercronic/releases
+CVE-2026-32280
+CVE-2026-32282
+CVE-2026-33810
