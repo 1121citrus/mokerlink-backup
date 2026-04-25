@@ -8,5 +8,7 @@
 # The upstream project has not yet published a release compiled with Go 1.26.2.
 # Tracked: https://github.com/aptible/supercronic/releases
 CVE-2026-32280
+CVE-2026-32281
 CVE-2026-32282
+CVE-2026-32283
 CVE-2026-33810

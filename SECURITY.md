@@ -176,7 +176,9 @@ and are unfixable until the affected upstream project publishes a new release.
 | Package | Binary | Installed version | Fixed version | CVE | Severity | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-32280 | High | Certificate chain DoS; fixed in Go 1.26.2 — awaiting new supercronic release |
+| `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-32281 | High | `crypto/x509` DoS via inefficient cert chain validation; fixed in Go 1.26.2 — awaiting new supercronic release |
 | `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-32282 | High | `Root.Chmod` symlink escape; fixed in Go 1.26.2 — awaiting new supercronic release |
+| `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-32283 | High | TLS multiple key update messages DoS; fixed in Go 1.26.2 — awaiting new supercronic release |
 | `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-33810 | High | `crypto/x509` DNS constraint bypass; fixed in Go 1.26.2 — awaiting new supercronic release |
 
 ### Fixed by Dockerfile pip upgrade
