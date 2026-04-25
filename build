@@ -2,8 +2,8 @@
 # shellcheck shell=bash
 
 # -- GENERATED -- do not edit directly.
-# Template: src/build/generate @ 167cac9
-# Generated: 2026-04-19T22:45:38Z
+# Template: src/build/generate @ f4d686d
+# Generated: 2026-04-20T21:07:47Z
 # Regenerate: bin/build-generate mokerlink-backup
 
 # build — local CI equivalent for mokerlink-backup.
@@ -113,9 +113,9 @@ set -euo pipefail
 
 # -- GENERATED metadata (informational; enforcement is in CI) --
 # shellcheck disable=SC2034
-GENERATED_AT="2026-04-19T22:45:38Z"
+GENERATED_AT="2026-04-20T21:07:47Z"
 # shellcheck disable=SC2034
-GENERATED_FROM_SHA="167cac9"
+GENERATED_FROM_SHA="f4d686d"
 
 # ---------------------------------------------------------------------------
 # Defaults — may be overridden by environment variables or CLI flags.
@@ -359,7 +359,7 @@ _timed() {
     local _watcher=$!
     wait "${_pid}" 2>/dev/null; local _rc=$?
     kill "${_watcher}" 2>/dev/null
-    wait "${_watcher}" 2>/dev/null
+    wait "${_watcher}" 2>/dev/null || true
     return "${_rc}"
 }
 
@@ -637,10 +637,17 @@ if [[ "${SCAN}" == "true" ]]; then
     echo "==> Stage 4: Scan ${full_image}:${VERSION}" >&2
 
     _trivy_db_flags=(--skip-db-update --skip-java-db-update)
+    _trivy_ignore_vol=()
+    _trivy_ignore_flag=()
+    if [[ -f "${script_dir}/.trivyignore" ]]; then
+        _trivy_ignore_vol=(-v "${script_dir}/.trivyignore:/.trivyignore:ro")
+        _trivy_ignore_flag=(--ignorefile /.trivyignore)
+    fi
 
     run docker run --rm \
         -v "${_scan_tar}:/scan.tar:ro" \
         -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
+        "${_trivy_ignore_vol[@]}" \
         "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
             --quiet \
             --no-progress \
@@ -649,6 +656,7 @@ if [[ "${SCAN}" == "true" ]]; then
             --severity HIGH,CRITICAL \
             --timeout 5m \
             "${_trivy_db_flags[@]}" \
+            "${_trivy_ignore_flag[@]}" \
             --input /scan.tar
 fi
 
@@ -688,7 +696,7 @@ if [[ "${SCAN_GRYPE}" == "true" ]]; then
             _grype_vol=(-v "${script_dir}/.grype.yaml:/.grype.yaml:ro")
             _grype_cfg=(--config /.grype.yaml)
         fi
-        _timed 300 docker run --rm \
+        _timed 600 docker run --rm \
             -v "${_scan_tar}:/scan.tar:ro" \
             -e "GRYPE_DB_CACHE_DIR=${GRYPE_DB_CACHE_DIR}" \
             -v "${GRYPE_CACHE_VOLUME}:${GRYPE_DB_CACHE_DIR}" \

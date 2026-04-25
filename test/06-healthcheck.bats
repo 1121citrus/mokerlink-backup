@@ -37,8 +37,7 @@ setup() {
     # shellcheck disable=SC2016
     script+=' && chmod 0600 /var/spool/cron/crontabs/$(id -un)'
     # shellcheck disable=SC2016
-    script+=' && supercronic /var/spool/cron/crontabs/$(id -un) &'
-    script+=' && sleep 0.5'
+    script+=' && { supercronic /var/spool/cron/crontabs/$(id -un) & sleep 0.5; }'
     script+=' && /usr/local/bin/healthcheck'
     run run_healthcheck "${script}" \
         --tmpfs /var/spool/cron/crontabs:uid=10001,gid=10001,mode=0700
@@ -61,8 +60,7 @@ _crond_setup+=' > /var/spool/cron/crontabs/$(id -un)'
 # shellcheck disable=SC2016
 _crond_setup+=' && chmod 0600 /var/spool/cron/crontabs/$(id -un)'
 # shellcheck disable=SC2016
-_crond_setup+=' && supercronic /var/spool/cron/crontabs/$(id -un) &'
-_crond_setup+=' && sleep 0.5'
+_crond_setup+=' && { supercronic /var/spool/cron/crontabs/$(id -un) & sleep 0.5; }'
 
 @test "healthcheck reports healthy when no sentinel file exists" {
     local script="${_crond_setup}"

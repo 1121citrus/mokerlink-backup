@@ -49,7 +49,7 @@ function is_crond_running() {
     # for images where pidof is absent or restricted.
     if pidof supercronic >/dev/null 2>&1; then
         return 0
-    elif pgrep -q supercronic; then
+    elif pgrep supercronic >/dev/null 2>&1; then
         return 0
     else
         error supercronic is not running

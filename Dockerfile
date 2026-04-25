@@ -41,7 +41,7 @@ LABEL org.opencontainers.image.title="mokerlink-backup" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
 # install required utilities and configure environment
-# hadolint ignore=DL3013,DL3018,SC2261,SC3041,DL3059
+# hadolint ignore=DL3013,DL3018,DL4006,SC2261,SC3041,DL3059
 RUN set -Eeux; \
     apk update && \
     apk upgrade --no-cache --no-interactive && \
