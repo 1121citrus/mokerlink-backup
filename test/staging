@@ -363,7 +363,7 @@ test_staging_all_excluded() {
 test_staging_backup_help() {
     local output result=0
     output=$(docker run --rm "${IMAGE}" /usr/local/bin/backup --help 2>&1) || result=$?
-    if [[ ${result} -eq 0 ]] && echo "${output}" | grep -q 'Usage:'; then
+    if [[ ${result} -eq 0 ]] && echo "${output}" | grep -qE 'Usage:|SYNOPSIS'; then
         echo "PASS '${FUNCNAME[0]}': backup --help exits 0 and prints usage"
     else
         echo "FAIL '${FUNCNAME[0]}': backup --help failed (exit=${result})"
@@ -613,6 +613,49 @@ test_staging_backup_direct() {
     fi
 }
 
+# test_staging_cron_startup: verify the scheduler container starts, writes its
+# crontab, and stays running — no switch credentials or AWS required.
+# Catches Dockerfile permission regressions (e.g. /var/spool/cron/crontabs
+# root-owned via Alpine symlink) that CLI-mode tests cannot exercise.
+test_staging_cron_startup() {
+    local container_id
+    # Use @daily so the job never fires during the test window.
+    # shellcheck disable=SC2086
+    container_id=$(docker run -d ${DOCKER_RUN_ARGS:-} \
+        -e "AWS_S3_BUCKET_NAME=test.fake-bucket-for-startup-test" \
+        -e "CRON_EXPRESSION=@daily" \
+        "${IMAGE}")
+    printf '  container %s started; waiting for scheduler init...\n' \
+        "${container_id:0:12}" >&2
+
+    sleep 3
+
+    local running
+    running=$(docker inspect --format '{{.State.Running}}' "${container_id}" \
+        2>/dev/null || echo "false")
+
+    local crontab_ok=false
+    if [[ "${running}" == "true" ]]; then
+        docker exec "${container_id}" \
+            test -f /var/spool/cron/crontabs/mokerlink-backup \
+            > /dev/null 2>&1 && crontab_ok=true
+    fi
+
+    docker stop "${container_id}" > /dev/null 2>&1
+    docker rm   "${container_id}" > /dev/null 2>&1
+
+    if [[ "${running}" != "true" ]]; then
+        echo "FAIL '${FUNCNAME[0]}': container exited within 3s of startup"
+        return 1
+    fi
+    if ! "${crontab_ok}"; then
+        echo "FAIL '${FUNCNAME[0]}': crontab file not found" \
+             "(crontabs directory likely root-owned)"
+        return 1
+    fi
+    echo "PASS '${FUNCNAME[0]}': scheduler running and crontab written"
+}
+
 # test_staging_cron_fires: start the full service container and wait for the
 # cron daemon to trigger a complete backup cycle.
 # Expected duration: up to 4 m (≤60 s to first cron tick + backup run time).
@@ -668,6 +711,7 @@ run_tests() {
     )
     local _e2e_tests=(
         test_staging_backup_direct
+        test_staging_cron_startup
         test_staging_cron_fires
     )
 
@@ -706,16 +750,26 @@ run_tests() {
             echo "    Trivy DB update skipped for this run (--cache skip-update=trivy)" >&2
             _trivy_extra_flags+=(--skip-db-update --skip-java-db-update)
         fi
+        local _project_dir
+        _project_dir=$(dirname "$(readlink -f "$0")")/..
+        local _trivy_vol_flags=()
+        local _trivy_ignore_flags=()
+        if [[ -f "${_project_dir}/.trivyignore" ]]; then
+            _trivy_vol_flags+=(-v "${_project_dir}/.trivyignore:/.trivyignore:ro")
+            _trivy_ignore_flags+=(--ignorefile /.trivyignore)
+        fi
         # shellcheck disable=SC2215
         docker run --rm \
             -v "${_trivy_tar}:/scan.tar:ro" \
             -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
+            "${_trivy_vol_flags[@]}" \
             "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
                 --quiet \
                 --no-progress \
                 --exit-code 1 \
                 --ignore-unfixed \
                 --severity HIGH,CRITICAL \
+                "${_trivy_ignore_flags[@]}" \
                 "${_trivy_extra_flags[@]}" \
                 --input /scan.tar
         rm -f "${_trivy_tar}"

@@ -156,7 +156,7 @@ docker buildx imagetools inspect 1121citrus/mokerlink-backup:<version> \
     --format '{{json .Provenance}}'
 ```
 
-## CVE status (last reviewed 2026-04-17)
+## CVE status (last reviewed 2026-04-21)
 
 Advisory scans are run with Grype and Docker Scout in addition to the gating
 Trivy scan.  The tables below reflect the state as of the last `build --advise
@@ -167,6 +167,19 @@ all` run.  Grype ignores are tracked in `.grype.yaml`.
 | Result | Notes |
 | --- | --- |
 | **0 vulnerabilities** | Gating scan passes; build is not blocked. |
+
+### Trivy-ignored — no patch available in upstream release
+
+The following CVEs are suppressed via `.trivyignore`.  All have been reviewed
+and are unfixable until the affected upstream project publishes a new release.
+
+| Package | Binary | Installed version | Fixed version | CVE | Severity | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-32280 | High | Certificate chain DoS; fixed in Go 1.26.2 — awaiting new supercronic release |
+| `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-32281 | High | `crypto/x509` DoS via inefficient cert chain validation; fixed in Go 1.26.2 — awaiting new supercronic release |
+| `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-32282 | High | `Root.Chmod` symlink escape; fixed in Go 1.26.2 — awaiting new supercronic release |
+| `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-32283 | High | TLS multiple key update messages DoS; fixed in Go 1.26.2 — awaiting new supercronic release |
+| `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-33810 | High | `crypto/x509` DNS constraint bypass; fixed in Go 1.26.2 — awaiting new supercronic release |
 
 ### Fixed by Dockerfile pip upgrade
 
@@ -215,7 +228,7 @@ None of these affect the image's primary threat surface (see Threat model above)
 
 ### Test suite status
 
-All 78 unit tests pass after the Dockerfile changes above.  The staging
+All 103 unit tests pass after the Dockerfile changes above.  The staging
 integration test (`test/staging`) requires a live Mokerlink switch and live AWS
 credentials; it is intentionally skipped in automated CI and must be run
 manually in a network-connected environment.

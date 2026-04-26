@@ -23,12 +23,12 @@ setup() {
     export -f run_healthcheck
 }
 
-@test "healthcheck exits non-zero when crond is absent" {
+@test "healthcheck exits non-zero when supercronic is absent" {
     run run_healthcheck "/usr/local/bin/healthcheck"
     [ "$status" -ne 0 ]
 }
 
-@test "healthcheck exits 0 with crond running and crontab configured" {
+@test "healthcheck exits 0 with supercronic running and crontab configured" {
     local script
     script='mkdir -p /var/spool/cron/crontabs'
     script+=' && printf "%s\n" "* * * * * /usr/local/bin/backup 2>&1"'
@@ -36,7 +36,8 @@ setup() {
     script+=' > /var/spool/cron/crontabs/$(id -un)'
     # shellcheck disable=SC2016
     script+=' && chmod 0600 /var/spool/cron/crontabs/$(id -un)'
-    script+=' && crond -l 2 && sleep 0.5'
+    # shellcheck disable=SC2016
+    script+=' && { supercronic /var/spool/cron/crontabs/$(id -un) & sleep 0.5; }'
     script+=' && /usr/local/bin/healthcheck'
     run run_healthcheck "${script}" \
         --tmpfs /var/spool/cron/crontabs:uid=10001,gid=10001,mode=0700
@@ -44,7 +45,8 @@ setup() {
 }
 
 @test "healthcheck exits non-zero when crontab is missing" {
-    local script='crond -l 2 && sleep 0.5 && /usr/local/bin/healthcheck'
+    # shellcheck disable=SC2016
+    local script='supercronic /var/spool/cron/crontabs/$(id -un) & sleep 0.5 && /usr/local/bin/healthcheck'
     run run_healthcheck "${script}"
     [ "$status" -ne 0 ]
 }
@@ -57,7 +59,8 @@ _crond_setup+=' && printf "%s\n" "* * * * * /usr/local/bin/backup 2>&1"'
 _crond_setup+=' > /var/spool/cron/crontabs/$(id -un)'
 # shellcheck disable=SC2016
 _crond_setup+=' && chmod 0600 /var/spool/cron/crontabs/$(id -un)'
-_crond_setup+=' && crond -l 2 && sleep 0.5'
+# shellcheck disable=SC2016
+_crond_setup+=' && { supercronic /var/spool/cron/crontabs/$(id -un) & sleep 0.5; }'
 
 @test "healthcheck reports healthy when no sentinel file exists" {
     local script="${_crond_setup}"

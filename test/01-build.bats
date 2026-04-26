@@ -24,11 +24,10 @@ setup() {
     [[ "${output}" == *"--cache CACHE_RULES"* ]]
 }
 
-@test "build --advice scout enables Scout advisement stage" {
+@test "build --advice scout is rejected (scout is gating)" {
     local output
-    output=$("${BUILD}" --advice scout --dry-run --no-lint --no-test --no-scan 2>&1)
-    echo "output: ${output}"
-    [[ "${output}" == *"Stage 5b: Advise (Scout)"* ]]
+    output=$("${BUILD}" --advice scout --dry-run --no-lint --no-test --no-scan 2>&1) || true
+    [[ "${output}" == *"Unknown advisement"* ]]
 }
 
 @test "build --advise Dive enables Dive advisement stage" {
@@ -88,21 +87,17 @@ setup() {
     [[ "${output}" == *"Stage 5d: Coverage"* ]]
 }
 
-@test "build --advise all enables all advisement stages" {
+@test "build --advise all enables Grype and Dive (scout is gating, not advisory)" {
     run "${BUILD}" --advise all --dry-run --no-lint --no-test --no-scan
     [ "$status" -eq 0 ]
-    [[ "${output}" == *"Stage 5a: Advise (Grype)"* ]]
-    [[ "${output}" == *"Stage 5b: Advise (Scout)"* ]]
     [[ "${output}" == *"Stage 5c: Advise (Dive)"* ]]
-    [[ "${output}" == *"Stage 5d: Coverage"* ]]
+    [[ "${output}" != *"Stage 5b: Advise (Scout)"* ]]
 }
 
-@test "build --advise scout,dive enables Scout and Dive but not Coverage" {
+@test "build --advise scout,dive is rejected (scout is gating)" {
     run "${BUILD}" --advise scout,dive --dry-run --no-lint --no-test --no-scan
-    [ "$status" -eq 0 ]
-    [[ "${output}" == *"Stage 5b: Advise (Scout)"* ]]
-    [[ "${output}" == *"Stage 5c: Advise (Dive)"* ]]
-    [[ "${output}" != *"Stage 5d"* ]]
+    [ "$status" -eq 1 ]
+    [[ "${output}" == *"Unknown advisement"* ]]
 }
 
 @test "build --advise rejects unknown advisement" {
