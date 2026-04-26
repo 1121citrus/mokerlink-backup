@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-26
+
 ### Changed
 - Developer features added to build and staging test scripts
 
@@ -44,7 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/1121citrus/mokerlink-backup/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/1121citrus/mokerlink-backup/compare/v0.0.3...v1.0.0
 [0.0.3]: https://github.com/1121citrus/mokerlink-backup/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/1121citrus/mokerlink-backup/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/1121citrus/mokerlink-backup/releases/tag/v0.0.1
