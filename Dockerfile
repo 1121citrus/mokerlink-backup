@@ -26,7 +26,7 @@ ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_DATE=unknown
 ARG UID=10001
-ARG SUPERCRONIC_VERSION=v0.2.44
+ARG SUPERCRONIC_VERSION=v0.2.45
 
 # OCI image annotations (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
 LABEL org.opencontainers.image.title="mokerlink-backup" \
