@@ -22,12 +22,12 @@ env:
 jobs:
   # ── Stage 1: Lint ──────────────────────────────────────────────────────────
   lint:
-    uses: 1121citrus/shared-github-workflows/.github/workflows/lint.yml@main
+    uses: 1121citrus/shared-github-workflows/.github/workflows/lint.yml@v1
 
   # ── Stage 2: Build ─────────────────────────────────────────────────────────
   build:
     needs: lint
-    uses: 1121citrus/shared-github-workflows/.github/workflows/build.yml@main
+    uses: 1121citrus/shared-github-workflows/.github/workflows/build.yml@v1
     with:
       image: 1121citrus/mokerlink-backup
 
@@ -66,7 +66,7 @@ jobs:
   # ── Stage 4: Security scan ─────────────────────────────────────────────────
   scan:
     needs: build
-    uses: 1121citrus/shared-github-workflows/.github/workflows/scan.yml@main
+    uses: 1121citrus/shared-github-workflows/.github/workflows/scan.yml@v1
     with:
       image: 1121citrus/mokerlink-backup
 
@@ -78,7 +78,7 @@ jobs:
         startsWith(github.ref, 'refs/tags/v') ||
         github.ref == 'refs/heads/staging'
       )
-    uses: 1121citrus/shared-github-workflows/.github/workflows/push.yml@main
+    uses: 1121citrus/shared-github-workflows/.github/workflows/push.yml@v1
     with:
       image: 1121citrus/mokerlink-backup
     secrets: inherit
