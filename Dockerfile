@@ -20,7 +20,7 @@
 
 # Pin the Alpine minor version so Dependabot can track base-image updates
 # and bumps are explicit, reviewable changes rather than silent upgrades.
-FROM alpine:3.22
+FROM alpine:3.23
 
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
