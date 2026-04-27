@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-04-27
+
+### Changed
+
+- Migrate base image from Alpine to Amazon Linux 2023 (AL2023); replace
+  `apk` with `dnf`; switch runtime packages to AL2023 equivalents
+- Bump `actions/checkout` v4 → v6.0.2
+- Bump `actions/download-artifact` v4 → v8.0.1
+- Switch Dependabot schedule from weekly to daily; remove stale Docker
+  ecosystem block (no direct `FROM` line in Dockerfile)
+
 ## [1.0.0] - 2026-04-26
 
 ### Changed
@@ -46,7 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/1121citrus/mokerlink-backup/compare/v0.0.3...v1.0.0
 [0.0.3]: https://github.com/1121citrus/mokerlink-backup/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/1121citrus/mokerlink-backup/compare/v0.0.1...v0.0.2
