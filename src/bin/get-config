@@ -86,10 +86,16 @@ expect "# "
 log_user 0
 # The firmware has two CLI levels: privileged exec (#) and user exec (>).
 # First `exit` steps down from # to >; second `exit` closes the session.
-send -- "exit\r"
-expect "> "
-send -- "exit\r"
-expect eof
+# Use catch because some firmware builds close the SSH session automatically
+# after the show command; in that case the exit sends are unnecessary and
+# would otherwise raise "spawn id not open".
+catch {send -- "exit\r"}
+expect {
+    "> " { catch {send -- "exit\r"} }
+    eof  {}
+    timeout {}
+}
+catch {expect eof}
 __END_OF_SCRIPT__
 }
 

@@ -4,29 +4,29 @@
 # network switch backups and copy them off site.
 #
 # Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-# 
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-# 
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Pin the Alpine minor version so Dependabot can track base-image updates
-# and bumps are explicit, reviewable changes rather than silent upgrades.
-FROM alpine:3.22
-
+ARG BASE_IMAGE=1121citrus/aws-backup-base:latest
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_DATE=unknown
 ARG UID=10001
-ARG SUPERCRONIC_VERSION=v0.2.45
+
+# hadolint ignore=DL3006
+FROM ${BASE_IMAGE}
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ARG VERSION
+ENV VERSION=${VERSION}
+
+ARG GIT_COMMIT
+ENV GIT_COMMIT=${GIT_COMMIT}
+
+ARG BUILD_DATE
+ENV BUILD_DATE=${BUILD_DATE}
+
+ARG UID
 
 # OCI image annotations (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
 LABEL org.opencontainers.image.title="mokerlink-backup" \
@@ -40,60 +40,47 @@ LABEL org.opencontainers.image.title="mokerlink-backup" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
-# install required utilities and configure environment
-# hadolint ignore=DL3013,DL3018,DL4006,SC2261,SC3041,DL3059
-RUN set -Eeux; \
-    apk update && \
-    apk upgrade --no-cache --no-interactive && \
-    apk add --no-cache --no-interactive --upgrade \
-        'aws-cli>2.20' \
-        'bash>5.2' \
-        'bzip2>1.0' \
-        'bzip3>1.3' \
-        'expect>5.45' \
-        'gnupg>2.4' \
-        'gzip>1.12' \
-        'lzop>1.04' \
-        'openssh>9.8' \
-        'openssl>3.3' \
-        'pigz>2.8' \
-        'pixz>1.0' \
-        'py3-cryptography>44.0' \
-        'py3-pip>23.0' \
-        'py3-urllib3>1.25' \
-        'xz>5.6' \
-        'zip>3.0' \
-        && \
-    echo "[INFO] installing supercronic ${SUPERCRONIC_VERSION}" \
-    && SUPERCRONIC_ARCH="$(uname -m \
-            | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
-    && wget -qO /usr/local/bin/supercronic \
-            "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${SUPERCRONIC_ARCH}" \
-    && chmod 0755 /usr/local/bin/supercronic \
-    && \
-    pip3 install --no-cache-dir --break-system-packages \
+# Install required utilities and configure environment.
+# bzip3 and pixz are not available in AL2023; gzip, bzip2, xz, lzop, and pigz
+# cover all common backup compression scenarios.
+# hadolint ignore=DL3041
+RUN set -eux; \
+    dnf install -y --quiet \
+        bzip2 \
+        expect \
+        gnupg2 \
+        gzip \
+        lzop \
+        openssh-clients \
+        openssl \
+        pigz \
+        python3 \
+        python3-pip \
+        xz \
+        zip \
+    && pip3 install --no-cache-dir --upgrade \
         'cryptography>=46.0.5' \
         'jaraco.context>=6.1.0' \
-        'pip>=25.3' \
         'urllib3>=2.6.3' \
         'wheel>=0.46.2' \
         'zipp>=3.19.1' \
-        && \
-    adduser \
-        --disabled-password --gecos "" --shell "/sbin/nologin" \
-        --uid "${UID}" mokerlink-backup && \
-    install -d -m 0700 -o mokerlink-backup \
+    && dnf reinstall -y --quiet python3-urllib3 \
+    && useradd \
+        --create-home --shell /sbin/nologin \
+        --uid "${UID}" mokerlink-backup \
+    && install -d -m 0700 -o mokerlink-backup \
         /home/mokerlink-backup/.gnupg \
-        /home/mokerlink-backup/.ssh && \
-    install -m 0600 -o mokerlink-backup /dev/null \
-        /home/mokerlink-backup/.gnupg/pubring.kbx && \
-    rm -f /var/spool/cron/crontabs && \
-    install -d -m 0755 -o mokerlink-backup /var/spool/cron/crontabs && \
-    mkdir -pv /usr/local/include/bash && \
-    ln -sf /usr/local/bin/common-functions /usr/local/include/bash/common-functions && \
-    mkdir -p /usr/local/share/mokerlink-backup && \
-    printf '%s\n' "${VERSION}" > /usr/local/share/mokerlink-backup/version && \
-    true
+        /home/mokerlink-backup/.ssh \
+    && install -m 0600 -o mokerlink-backup /dev/null \
+        /home/mokerlink-backup/.gnupg/pubring.kbx \
+    && install -d -m 755 /var/spool/cron \
+    && install -d -m 0755 -o mokerlink-backup /var/spool/cron/crontabs \
+    && mkdir -pv /usr/local/include/bash \
+    && ln -sf /usr/local/bin/common-functions /usr/local/include/bash/common-functions \
+    && mkdir -p /usr/local/share/mokerlink-backup \
+    && printf '%s\n' "${VERSION}" > /usr/local/share/mokerlink-backup/version \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
 
 COPY --chmod=755 ./src/bin/* /usr/local/bin
 COPY --chmod=755 ./src/common-functions /usr/local/bin/
@@ -103,4 +90,3 @@ USER mokerlink-backup
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD /usr/local/bin/healthcheck
 
 CMD [ "/usr/local/bin/startup" ]
-
