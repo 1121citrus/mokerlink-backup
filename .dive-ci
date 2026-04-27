@@ -3,12 +3,12 @@ rules:
   lowestEfficiency: 0.9
 
   # Absolute wasted bytes above this threshold fails the check.
-  # Disabled: `apk upgrade` on Alpine unavoidably overwrites base-image files
+  # Disabled: `dnf upgrade` on AL2023 unavoidably overwrites base-image files
   # (old versions remain in the base layer), which Dive counts as wasted space.
   highestWastedBytes: disabled
 
   # Percentage of wasted user-layer space above this threshold fails the check.
-  # Default is 0.1 (10%).  Relaxed to 0.20: `apk upgrade` replaces Alpine base
-  # files, registering as layer waste.  20% provides a buffer for that while
-  # still catching genuinely bloated images.
+  # Default is 0.1 (10%).  Relaxed to 0.20: `dnf upgrade` on AL2023 replaces
+  # base files, registering as layer waste.  20% provides a buffer for that
+  # while still catching genuinely bloated images.
   highestUserWastedPercent: 0.20

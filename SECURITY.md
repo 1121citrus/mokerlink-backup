@@ -125,7 +125,7 @@ Recommended S3 bucket configuration:
 
 - The container runs as the dedicated `mokerlink-backup` user (UID 10001,
   shell `/sbin/nologin`, no login shell).  The crontab is written to
-  `/var/spool/cron/crontabs/mokerlink-backup`; `crond` reads it as that user.
+  `/var/spool/cron/crontabs/mokerlink-backup`; supercronic reads it as that user.
 - The `~/.gnupg` and `~/.ssh` directories are created with mode `700` and
   `~/.gnupg/pubring.kbx` with mode `600` in the Dockerfile, all owned by
   the service user.
@@ -135,16 +135,11 @@ Recommended S3 bucket configuration:
 
 ## Dependency provenance
 
-The Docker image is built on `alpine:3.22` (official Docker Hub image).  All
-packages are installed from the Alpine package index pinned to version
-constraints in the `Dockerfile`.  The CI pipeline runs a
-[Trivy](https://github.com/aquasecurity/trivy) vulnerability scan after every
-build and fails on unfixed CVEs.
-
-Two Python packages (`cryptography` and `urllib3`) are upgraded beyond the
-Alpine-packaged versions via pip in the Dockerfile build layer.  This is
-necessary because Alpine 3.22 does not yet carry patched `py3-cryptography` or
-`py3-urllib3` apk packages for the CVEs listed below.
+The image extends `1121citrus/aws-backup-base` (Amazon Linux 2023, digest-pinned).
+Additional packages are installed via `dnf` and Python packages via pip with
+minimum version constraints in `requirements.txt`.  The CI pipeline runs
+[Trivy](https://github.com/aquasecurity/trivy), Grype, and Docker Scout
+vulnerability scans after every build.
 
 Supply chain attestations (SBOM + provenance) are attached to every published
 image and can be inspected with:
@@ -156,11 +151,10 @@ docker buildx imagetools inspect 1121citrus/mokerlink-backup:<version> \
     --format '{{json .Provenance}}'
 ```
 
-## CVE status (last reviewed 2026-04-21)
+## CVE status (last reviewed 2026-04-27)
 
 Advisory scans are run with Grype and Docker Scout in addition to the gating
-Trivy scan.  The tables below reflect the state as of the last `build --advise
-all` run.  Grype ignores are tracked in `.grype.yaml`.
+Trivy scan.
 
 ### Trivy (gating scan)
 
@@ -168,63 +162,24 @@ all` run.  Grype ignores are tracked in `.grype.yaml`.
 | --- | --- |
 | **0 vulnerabilities** | Gating scan passes; build is not blocked. |
 
-### Trivy-ignored — no patch available in upstream release
+### Open vulnerabilities
 
-The following CVEs are suppressed via `.trivyignore`.  All have been reviewed
-and are unfixable until the affected upstream project publishes a new release.
+None. The migration to Amazon Linux 2023 (v1.0.1, 2026-04-27) resolved all
+previously documented Alpine-specific CVEs. CI runs Trivy, Grype, and Docker
+Scout on every push; any new findings will be tracked here.
 
-| Package | Binary | Installed version | Fixed version | CVE | Severity | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-32280 | High | Certificate chain DoS; fixed in Go 1.26.2 — awaiting new supercronic release |
-| `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-32281 | High | `crypto/x509` DoS via inefficient cert chain validation; fixed in Go 1.26.2 — awaiting new supercronic release |
-| `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-32282 | High | `Root.Chmod` symlink escape; fixed in Go 1.26.2 — awaiting new supercronic release |
-| `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-32283 | High | TLS multiple key update messages DoS; fixed in Go 1.26.2 — awaiting new supercronic release |
-| `stdlib` (Go) | `supercronic` | v1.26.1 | 1.26.2 | CVE-2026-33810 | High | `crypto/x509` DNS constraint bypass; fixed in Go 1.26.2 — awaiting new supercronic release |
+### Remediated vulnerabilities
 
-### Fixed by Dockerfile pip upgrade
-
-The following CVEs were remediated by pip-installing patched versions over the
-Alpine-packaged versions (or pip's own bundled dependencies).
-The pip step runs in the same `RUN` layer as the `apk add` installs.
-
-| Package | Installed (apk/pip) | Fixed (pip) | CVEs / GHSAs | Severity |
-| --- | --- | --- | --- | --- |
-| `cryptography` | 44.0.3-r0 | ≥ 46.0.5 | GHSA-r6ph-v2qm-q3c2, CVE-2026-26007 | High |
-| `urllib3` | 1.26.20-r1 | ≥ 2.6.3 | GHSA-gm62-xv2j-4w53, GHSA-38jv-5279-wg99, GHSA-2xpw-w6gg-jr37, CVE-2026-21441, CVE-2025-66471, CVE-2025-66418 | High |
-| `wheel` | 0.45.1 (pip dep) | ≥ 0.46.2 | GHSA-8rrh-rw8j-w5fx, CVE-2026-24049 | High |
-| `jaraco.context` | 5.3.0 (pip dep) | ≥ 6.1.0 | GHSA-58pv-8j8x-9vj2 | High |
-| `pip` | 25.1.1-r0 | ≥ 25.3 | GHSA-4xh5-x5gv-qwph, CVE-2025-8869 | Medium |
-| `zipp` | 3.17.0 (pip dep) | ≥ 3.19.1 | GHSA-jfmj-5v4g-7637, CVE-2024-5569 | Medium |
-
-Trivy (the gating scanner) confirms **0 vulnerabilities** for all pip-managed
-Python packages after the upgrade step.
-
-### Unfixed — no patch available in Alpine 3.22
-
-The following findings have no available fix in the Alpine package index.  They
-are tracked here and will be re-evaluated when Alpine releases patched packages.
-None of these affect the image's primary threat surface (see Threat model above).
-
-| Package | Version | CVE | Severity | Notes |
-| --- | --- | --- | --- | --- |
-| `python3` | 3.12.13-r0 | CVE-2025-13836 | High | No Alpine fix available |
-| `unzip` | 6.0-r15 | CVE-2008-0888 | High | No Alpine fix; unzip is used only by `zip` compression path, not network-facing |
-| `py3-urllib3` (apk) | 1.26.20-r1 | CVE-2025-66471, CVE-2025-66418 | High | Alpine apk package superseded by pip-installed 2.6.3; advisory scanners may still flag the apk metadata entry |
-| `py3-cryptography` (apk) | 44.0.3-r0 | CVE-2026-26007 | High | Alpine apk package superseded by pip-installed ≥ 46.0.5; advisory scanners may still flag the apk metadata entry |
-| `py3-pip` (apk) | 25.1.1-r0 | CVE-2025-8869, CVE-2026-1703 | Med/Low | Alpine apk entry for pip superseded by pip-installed 26.x; advisory scanners may still flag the apk metadata entry |
-| `wheel` (pip-vendored) | 0.45.1 | GHSA-8rrh-rw8j-w5fx | High | pip internally vendors a copy of wheel for bootstrap purposes; this is distinct from the standalone `wheel` package (upgraded to 0.46.3). The vendored copy lives inside pip's own source tree and cannot be upgraded externally. Trivy confirms 0 vulns for the standalone installed package. |
-| `jaraco.context` (pip-vendored) | 5.3.0 | GHSA-58pv-8j8x-9vj2 | High | pip internally vendors a copy of `jaraco.context`; this is distinct from the standalone package (upgraded to 6.1.2). Cannot be upgraded externally. Trivy confirms 0 vulns for the standalone installed package. |
-| `busybox` | 1.37.0-r20 | CVE-2025-60876 | Medium | No Alpine fix available |
-| `openssh` | 10.0_p1-r10 | CVE-2026-35414 | Medium | No Alpine fix available |
-| `openldap` | 2.6.8-r0 | CVE-2026-22185 | Medium | No Alpine fix; openldap is a transitive dependency |
-| `gnupg` (and sub-packages) | 2.4.9-r0 | CVE-2022-3219 | Low | No Alpine fix |
-| `lz4` | 1.10.0-r0 | CVE-2025-62813 | Unspecified | No Alpine fix; lz4 is a transitive dependency |
-
-### False positives noted
-
-| Package | Version | CVE | Tool | Reason |
-| --- | --- | --- | --- | --- |
-| `py3-jmespath` | 1.0.1-r4 | CVE-2022-32511 | Grype | CVE-2022-32511 was fixed in jmespath 1.0.1; the installed version (1.0.1-r4) is at or above the fix version — Grype does not record a `fixed-in` entry, indicating a stale or incorrect database entry |
+| CVE / Advisory | Component | Remediation |
+| --- | --- | --- |
+| Alpine APK CVEs (multiple) | `python3`, `busybox`, `openssh`, `unzip`, `py3-urllib3`, `py3-cryptography`, `py3-pip` | Resolved by migrating base image from Alpine 3.22 to AL2023 (v1.0.1) |
+| CVE-2026-32280 — CVE-2026-33810 | supercronic Go stdlib | Resolved: `aws-backup-base` now ships supercronic v0.2.45 (Go ≥1.26.2) |
+| GHSA-r6ph-v2qm-q3c2, CVE-2026-26007 | cryptography (pip) | Pinned `cryptography>=47.0.0` in `requirements.txt` |
+| GHSA-gm62-xv2j-4w53 + 3 others | urllib3 (pip) | Pinned `urllib3>=2.6.3` in `requirements.txt` |
+| GHSA-8rrh-rw8j-w5fx, CVE-2026-24049 | wheel (pip) | Pinned `wheel>=0.47.0` in `requirements.txt` |
+| GHSA-58pv-8j8x-9vj2 | jaraco.context (pip) | Pinned `jaraco-context>=6.1.2` in `requirements.txt` |
+| GHSA-4xh5-x5gv-qwph, CVE-2025-8869 | pip | Upgraded to pip≥25.3 (via `aws-backup-base`) |
+| GHSA-jfmj-5v4g-7637, CVE-2024-5569 | zipp (pip) | Pinned `zipp>=3.23.1` in `requirements.txt` |
 
 ### Test suite status
 
