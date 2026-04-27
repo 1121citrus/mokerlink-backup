@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 
-# -- GENERATED -- do not edit directly.
-# Template: src/build/generate @ f4d686d
-# Generated: 2026-04-20T21:07:47Z
-# Regenerate: bin/build-generate mokerlink-backup
-
 # build — local CI equivalent for mokerlink-backup.
 #
 # Copyright (C) 2025-2026 James Hanlon [mailto:jim@hanlonsoftware.com]
@@ -113,9 +108,9 @@ set -euo pipefail
 
 # -- GENERATED metadata (informational; enforcement is in CI) --
 # shellcheck disable=SC2034
-GENERATED_AT="2026-04-20T21:07:47Z"
+GENERATED_AT="2026-04-27T14:35:12Z"
 # shellcheck disable=SC2034
-GENERATED_FROM_SHA="f4d686d"
+GENERATED_FROM_SHA="a7999ba"
 
 # ---------------------------------------------------------------------------
 # Defaults — may be overridden by environment variables or CLI flags.
@@ -464,12 +459,18 @@ fi
 
 # ---------------------------------------------------------------------------
 # Construct the tag list.
+# Dev builds are tagged as both dev-<commit> and dev-latest.
 # "latest" is only added for non-dev (release) builds that will be pushed.
 # ---------------------------------------------------------------------------
 full_image="${REGISTRY}/${IMAGE_NAME}"
-tags=("--tag" "${full_image}:${VERSION}")
-if [[ "${PUSH}" == "true" && "${VERSION}" != dev-* ]]; then
-    tags+=("--tag" "${full_image}:latest")
+# Re-tag as :latest locally so test scripts that default to IMAGE:latest work.
+tags=("--tag" "${full_image}:${VERSION}" "--tag" "${full_image}:latest")
+if [[ "${VERSION}" == dev-* ]]; then
+    tags+=("--tag" "${full_image}:dev-latest")
+fi
+if [[ "${PUSH}" == "true" && "${VERSION}" == dev-* ]]; then
+    # For dev builds being pushed, keep dev tags but drop :latest.
+    tags=("--tag" "${full_image}:${VERSION}" "--tag" "${full_image}:dev-latest")
 fi
 
 # Script directory for build context and relative paths.
@@ -637,17 +638,10 @@ if [[ "${SCAN}" == "true" ]]; then
     echo "==> Stage 4: Scan ${full_image}:${VERSION}" >&2
 
     _trivy_db_flags=(--skip-db-update --skip-java-db-update)
-    _trivy_ignore_vol=()
-    _trivy_ignore_flag=()
-    if [[ -f "${script_dir}/.trivyignore" ]]; then
-        _trivy_ignore_vol=(-v "${script_dir}/.trivyignore:/.trivyignore:ro")
-        _trivy_ignore_flag=(--ignorefile /.trivyignore)
-    fi
 
     run docker run --rm \
         -v "${_scan_tar}:/scan.tar:ro" \
         -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
-        "${_trivy_ignore_vol[@]}" \
         "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
             --quiet \
             --no-progress \
@@ -656,7 +650,6 @@ if [[ "${SCAN}" == "true" ]]; then
             --severity HIGH,CRITICAL \
             --timeout 5m \
             "${_trivy_db_flags[@]}" \
-            "${_trivy_ignore_flag[@]}" \
             --input /scan.tar
 fi
 
@@ -815,9 +808,11 @@ fi
 if [[ "${PUSH}" == "true" ]]; then
     echo "==> Stage 6: Push ${full_image}:${VERSION} (${PLATFORMS})" >&2
 
-    # For push, only include :latest on non-dev releases.
+    # For push, include :latest on releases and :dev-latest on dev builds.
     push_tags=("--tag" "${full_image}:${VERSION}")
-    if [[ "${VERSION}" != dev-* ]]; then
+    if [[ "${VERSION}" == dev-* ]]; then
+        push_tags+=("--tag" "${full_image}:dev-latest")
+    else
         push_tags+=("--tag" "${full_image}:latest")
     fi
 
