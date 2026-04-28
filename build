@@ -115,9 +115,9 @@ set -euo pipefail
 
 # -- GENERATED metadata (informational; enforcement is in CI) --
 # shellcheck disable=SC2034
-GENERATED_AT="2026-04-28T01:14:05Z"
+GENERATED_AT="2026-04-28T01:30:43Z"
 # shellcheck disable=SC2034
-GENERATED_FROM_SHA="32d6444"
+GENERATED_FROM_SHA="85cd04f"
 
 # ---------------------------------------------------------------------------
 # Defaults — may be overridden by environment variables or CLI flags.
@@ -642,6 +642,9 @@ if [[ "${TEST}" == "true" ]]; then
         "${script_dir}/test/04-backup-success.bats" \
         "${script_dir}/test/05-backup-encryption.bats" \
         "${script_dir}/test/06-healthcheck.bats" \
+        "${script_dir}/test/07-image-metadata.bats" \
+        "${script_dir}/test/08-startup.bats" \
+        "${script_dir}/test/09-source-coverage.bats" \
         "${script_dir}/test/staging" \
         "${script_dir}/test/bin/"*
     if [[ -x "${script_dir}/test/run-all" ]]; then
@@ -869,6 +872,7 @@ if [[ "${ADVISE_COVERAGE}" == "true" ]]; then
                 test/06-healthcheck.bats \
                 test/07-image-metadata.bats \
                 test/08-startup.bats \
+                test/09-source-coverage.bats \
             >&2 || echo "    Coverage run failed (advisory only)" >&2
     fi
 fi
