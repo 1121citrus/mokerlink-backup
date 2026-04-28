@@ -106,11 +106,20 @@
 
 set -euo pipefail
 
-# -- GENERATED metadata (informational; enforcement is in CI) --
-# shellcheck disable=SC2034
-GENERATED_AT="2026-04-28T05:32:48Z"
-# shellcheck disable=SC2034
-GENERATED_FROM_SHA="97e73e5"
+# ---------------------------------------------------------------------------
+# Developer orientation
+#
+# This script is the local equivalent of the CI workflow. Run it before
+# pushing to verify that every quality gate passes. Each stage can be
+# skipped individually (see OPTIONS above).
+#
+# Scanner DB caches persist in Docker named volumes between runs. The first
+# run primes the cache from the internet; later runs skip the download.
+# Use --cache reset=all to force a fresh download before a release scan.
+#
+# --dry-run prints every command without executing it — useful for
+# understanding what a stage does before running it for the first time.
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Defaults — may be overridden by environment variables or CLI flags.
@@ -138,7 +147,7 @@ VERSION=${BUILD_VERSION:-}
 
 IMAGE_NAME=mokerlink-backup
 
-# Tool image references — update these in src/build/pins.json and regenerate.
+# Tool image references — edit these variables to update tool versions.
 BATS_KCOV_IMAGE=1121citrus/bats-kcov
 BATS_KCOV_TAG=latest
 DIVE_DOCKER_CLIENT_API=1.47
@@ -162,6 +171,9 @@ GRYPE_DB_CACHE_DIR=/grype-db
 # ---------------------------------------------------------------------------
 # Helpers: cache control parsing
 # ---------------------------------------------------------------------------
+# set_cache_targets — set cache-control flags for the named scanner targets.
+# Called by parse_cache_rules for each key=value pair from --cache.
+# Args: $1=mode (reset|skip-update)  $2=targets_csv (trivy,grype,all)
 set_cache_targets() {
     local mode="$1"
     local targets_csv="$2"
@@ -201,6 +213,10 @@ set_cache_targets() {
     done
 }
 
+# parse_cache_rules — parse the --cache flag value and dispatch to
+# set_cache_targets.  Accepts semicolon-separated key=value pairs
+# (e.g. "reset=trivy;skip-update=grype").  Exits 1 on malformed input.
+# Args: $1=rules (semicolon-separated string)
 parse_cache_rules() {
     local rules="$1"
     local entry
@@ -237,6 +253,10 @@ parse_cache_rules() {
     done
 }
 
+# volume_has_file — return 0 if file_path exists inside a Docker volume.
+# Runs an Alpine container to perform the check so it is host-filesystem-
+# agnostic.  Always returns 1 in dry-run mode (safe-fail).
+# Args: $1=volume_name  $2=file_path (absolute path inside the volume)
 volume_has_file() {
     local volume_name="$1"
     local file_path="$2"
@@ -251,6 +271,11 @@ volume_has_file() {
         sh -c "test -f \"${file_path}\""
 }
 
+# grype_db_ready — return 0 if the Grype vulnerability database is present
+# and valid inside the cache volume.  Runs `grype db status` inside a
+# container so it uses the same paths as the actual scan.  Always returns 1
+# in dry-run mode (safe-fail).
+# Args: $1=volume_name
 grype_db_ready() {
     local volume_name="$1"
 
@@ -264,6 +289,10 @@ grype_db_ready() {
         "${GRYPE_IMAGE}:${GRYPE_TAG}" db status >/dev/null 2>&1
 }
 
+# reset_cache_db — wipe and recreate a Docker volume used as a scanner DB
+# cache (Trivy or Grype).  Runs Alpine inside a container so the operation
+# is cross-platform and independent of host filesystem permissions.
+# Args: $1=volume_name
 reset_cache_db() {
     local volume_name="$1"
     # Reset the volume by removing all contents and recreating the directory.

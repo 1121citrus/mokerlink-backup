@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 
-# Auto-generated test/run-all wrapper script
-# Generator: build-generate
-# DO NOT EDIT MANUALLY
+# test/run-all wrapper script
 
 set -euo pipefail
 
