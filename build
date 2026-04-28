@@ -11,6 +11,7 @@
 #         [--platform PLATFORMS] [--registry REGISTRY]
 #         [--no-sbom] [--no-provenance]
 #         [--no-lint] [--no-test]
+#         [--run-staging]
 #         [--no-scan]
 #         [--advise [ADVISEMENTS]] [--advice [ADVISEMENTS]] [--no-advise]
 #         [--cache CACHE_RULES]
@@ -32,6 +33,7 @@
 #   --no-provenance     Skip generating a provenance attestation (push only).
 #   --no-lint           Skip hadolint Dockerfile check and shellcheck.
 #   --no-test           Skip running the test suite.
+#   --run-staging       Run test/staging after Stage 3 test. Default: off.
 #   --no-scan           Skip all gating vulnerability scans (Trivy, Grype,
 #                       Scout). Also skips advisory scans by default; pass
 #                       --advise after --no-scan to keep them.
@@ -61,6 +63,10 @@
 #   are themselves overridden by the matching CLI flag:
 #     BUILD_VERSION, BUILD_PUSH, BUILD_PLATFORM, BUILD_REGISTRY
 #     BUILD_LINT, BUILD_TEST, BUILD_SCAN, BUILD_SCAN_GRYPE, BUILD_SCAN_SCOUT
+#     BUILD_REPORT_JSON
+#     BUILD_TEST_SUMMARY_JSON
+#     BUILD_RUN_STAGING
+#     BUILD_STAGING_SUMMARY_JSON
 #   BUILD_CACHE_WARN_DAYS
 #                       Warn when the Trivy or Grype DB is older than this
 #                       many days. Default: 1. Set to 0 to suppress.
@@ -75,6 +81,7 @@
 #   1.  Lint      — hadolint (Dockerfile) + shellcheck + markdownlint
 #   2.  Build     — single-platform --load into local Docker daemon
 #   3.  Test      — bats test suite
+#   3d. Staging   — optional integration harness (only with --run-staging)
 #   4.  Scan      — Trivy CRITICAL/HIGH image scan (gating)
 #   4b. Scan      — Grype full-severity scan (gating)
 #   4c. Scan      — Docker Scout CVE scan (gating)
@@ -108,9 +115,9 @@ set -euo pipefail
 
 # -- GENERATED metadata (informational; enforcement is in CI) --
 # shellcheck disable=SC2034
-GENERATED_AT="2026-04-27T14:35:12Z"
+GENERATED_AT="2026-04-28T00:43:48Z"
 # shellcheck disable=SC2034
-GENERATED_FROM_SHA="a7999ba"
+GENERATED_FROM_SHA="ee60d50"
 
 # ---------------------------------------------------------------------------
 # Defaults — may be overridden by environment variables or CLI flags.
@@ -127,6 +134,7 @@ CACHE_SKIP_UPDATE_TRIVY=false
 CACHE_SKIP_UPDATE_GRYPE=false
 CACHE_WARN_DAYS=${BUILD_CACHE_WARN_DAYS:-1}
 DRY_RUN=false
+BUILD_REPORT_JSON=${BUILD_REPORT_JSON:-}
 LINT=${BUILD_LINT:-true}
 PLATFORMS=${BUILD_PLATFORM:-linux/amd64,linux/arm64}
 PROVENANCE=true
@@ -134,6 +142,11 @@ PUSH=${BUILD_PUSH:-false}
 REGISTRY=${BUILD_REGISTRY:-1121citrus}
 SBOM=true
 TEST=${BUILD_TEST:-true}
+TEST_SUMMARY_JSON=${BUILD_TEST_SUMMARY_JSON:-}
+RUN_STAGING=${BUILD_RUN_STAGING:-false}
+STAGING_SUMMARY_JSON=${BUILD_STAGING_SUMMARY_JSON:-}
+if [[ -n "${BUILD_REPORT_JSON}" && -z "${TEST_SUMMARY_JSON}" ]]; then TEST_SUMMARY_JSON="${BUILD_REPORT_JSON%.json}.test.json"; fi
+if [[ -n "${BUILD_REPORT_JSON}" && -z "${STAGING_SUMMARY_JSON}" ]]; then STAGING_SUMMARY_JSON="${BUILD_REPORT_JSON%.json}.staging.json"; fi
 VERSION=${BUILD_VERSION:-}
 
 IMAGE_NAME=mokerlink-backup
@@ -358,6 +371,45 @@ _timed() {
     return "${_rc}"
 }
 
+# Build report helper: writes optional aggregate JSON report combining
+# test and staging summary artifacts.
+write_build_report() {
+    if [[ -z "${BUILD_REPORT_JSON:-}" ]]; then
+        return 0
+    fi
+
+    local test_json="null"
+    local staging_json="null"
+
+    if [[ -n "${TEST_SUMMARY_JSON:-}" && -f "${TEST_SUMMARY_JSON}" ]]; then
+        test_json=$(cat "${TEST_SUMMARY_JSON}")
+    fi
+
+    if [[ -n "${STAGING_SUMMARY_JSON:-}" && -f "${STAGING_SUMMARY_JSON}" ]]; then
+        staging_json=$(cat "${STAGING_SUMMARY_JSON}")
+    fi
+
+    mkdir -p "$(dirname "${BUILD_REPORT_JSON}")"
+
+    cat > "${BUILD_REPORT_JSON}" <<EOF
+{
+  "kind": "build-report",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "image": "${full_image}:${VERSION}",
+  "test": ${test_json},
+  "staging": ${staging_json}
+}
+EOF
+
+    echo "    report: ${BUILD_REPORT_JSON}" >&2
+    if [[ -n "${TEST_SUMMARY_JSON:-}" ]]; then
+        echo "    report section test: ${TEST_SUMMARY_JSON}" >&2
+    fi
+    if [[ -n "${STAGING_SUMMARY_JSON:-}" ]]; then
+        echo "    report section staging: ${STAGING_SUMMARY_JSON}" >&2
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -380,6 +432,7 @@ while [[ $# -gt 0 ]]; do
         --no-provenance)    PROVENANCE=false ;;
         --no-lint)          LINT=false ;;
         --no-test)          TEST=false ;;
+        --run-staging)      RUN_STAGING=true ;;
         --no-scan)
             SCAN=false
             SCAN_GRYPE=false
@@ -591,7 +644,26 @@ if [[ "${TEST}" == "true" ]]; then
         "${script_dir}/test/06-healthcheck.bats" \
         "${script_dir}/test/staging" \
         "${script_dir}/test/bin/"*
+    if [[ -x "${script_dir}/test/run-all" ]]; then
+        (cd "${script_dir}" && env IMAGE="${full_image}:${VERSION}" TEST_SUMMARY_JSON="${TEST_SUMMARY_JSON}" run ./test/run-all)
+    else
     (cd "${script_dir}" && IMAGE="${full_image}:${VERSION}" run ./test/run-all)
+    fi
+    write_build_report
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 3d: Staging (optional)
+# Runs test/staging only when explicitly requested with --run-staging.
+# ---------------------------------------------------------------------------
+if [[ "${RUN_STAGING}" == "true" ]]; then
+    echo "==> Stage 3d: Staging" >&2
+    if [[ ! -x "${script_dir}/test/staging" ]]; then
+        echo "    SKIP: test/staging not found or not executable" >&2
+    else
+        (cd "${script_dir}" && run env STAGING_SUMMARY_JSON="${STAGING_SUMMARY_JSON}" ./test/staging)
+    fi
+    write_build_report
 fi
 
 # ---------------------------------------------------------------------------
@@ -797,7 +869,6 @@ if [[ "${ADVISE_COVERAGE}" == "true" ]]; then
                 test/06-healthcheck.bats \
                 test/07-image-metadata.bats \
                 test/08-startup.bats \
-                test/09-source-coverage.bats \
             >&2 || echo "    Coverage run failed (advisory only)" >&2
     fi
 fi
