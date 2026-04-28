@@ -108,9 +108,9 @@ set -euo pipefail
 
 # -- GENERATED metadata (informational; enforcement is in CI) --
 # shellcheck disable=SC2034
-GENERATED_AT="2026-04-28T05:24:17Z"
+GENERATED_AT="2026-04-28T05:32:48Z"
 # shellcheck disable=SC2034
-GENERATED_FROM_SHA="adb04d8"
+GENERATED_FROM_SHA="97e73e5"
 
 # ---------------------------------------------------------------------------
 # Defaults — may be overridden by environment variables or CLI flags.
