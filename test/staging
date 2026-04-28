@@ -332,6 +332,28 @@ _append_aws_mounts() {
     fi
 }
 
+# _wait_for_log_pattern <container> <grep_pattern> <timeout_s>
+# Polls docker logs every 10s until <grep_pattern> matches or <timeout_s>
+# elapses.  Sets _WAIT_ELAPSED to elapsed seconds.  Progress to stderr.
+# Returns 0 if pattern found, 1 if timed out.
+_wait_for_log_pattern() {
+    local _ctr="$1" _pat="$2" _tmo="$3"
+    local _elapsed=0 _interval=10 _last
+    _WAIT_ELAPSED=0
+    while [[ ${_elapsed} -lt ${_tmo} ]]; do
+        sleep "${_interval}"
+        _elapsed=$(( _elapsed + _interval ))
+        if docker logs "${_ctr}" 2>&1 | grep -q "${_pat}"; then
+            _WAIT_ELAPSED=${_elapsed}
+            return 0
+        fi
+        _last=$(docker logs --tail 1 "${_ctr}" 2>&1)
+        printf '  [%ds] waiting... (last: %s)\n' "${_elapsed}" "${_last}" >&2
+    done
+    _WAIT_ELAPSED=${_elapsed}
+    return 1
+}
+
 # ---------------------------------------------------------------------------
 # Repo-specific helpers and test implementations (staging-hooks.sh)
 # ---------------------------------------------------------------------------
