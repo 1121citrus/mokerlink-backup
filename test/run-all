@@ -1,12 +1,39 @@
 #!/usr/bin/env bash
+# 1121citrus.build-date 2026-05-01T00:52:40Z
+# 1121citrus.build-version 6bbe275c0778
 
 # test/run-all wrapper script
 
 set -euo pipefail
 
 whereami=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+started_at=$(date +%s)
+summary_file="${TEST_SUMMARY_JSON:-}"
 
-(
+timestamp_utc() {
+    date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
+write_test_summary() {
+    local status="$1" rc="$2" duration="$3"
+    if [[ -z "${summary_file}" ]]; then
+        return 0
+    fi
+    mkdir -p "$(dirname "${summary_file}")"
+    cat > "${summary_file}" <<EOF
+{
+  "kind": "test-run-all",
+  "status": "${status}",
+  "exit_code": ${rc},
+  "duration_seconds": ${duration},
+  "timestamp": "$(timestamp_utc)"
+}
+EOF
+}
+
+echo "==> test/run-all: start" >&2
+
+if (
     cd "${whereami}/.." && docker run --rm --interactive \
         -v "${PWD}:${PWD}" \
         -v /tmp:/tmp \
@@ -16,4 +43,15 @@ whereami=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
         --entrypoint sh \
         "bats/bats:1.13.0" \
         -c "apk add --quiet --no-cache docker-cli >/dev/null 2>&1 && bats test"
-)
+); then
+    finished_at=$(date +%s)
+    write_test_summary "passed" 0 "$((finished_at - started_at))"
+    echo "==> test/run-all: PASS ($((finished_at - started_at))s)" >&2
+    exit 0
+else
+    rc=$?
+    finished_at=$(date +%s)
+    write_test_summary "failed" "${rc}" "$((finished_at - started_at))"
+    echo "==> test/run-all: FAIL rc=${rc} ($((finished_at - started_at))s)" >&2
+    exit "${rc}"
+fi

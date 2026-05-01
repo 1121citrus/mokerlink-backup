@@ -1,7 +1,41 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
+# 1121citrus.build-date 2026-05-01T00:52:40Z
+# 1121citrus.build-version 6bbe275c0778
 
 # test/staging — functional staging tests for mokerlink-backup.
+#
+# SYNOPSIS
+#   test/staging [--image IMAGE]
+#                [--bucket BUCKET]
+#                [--aws-credentials FILE]
+#                [--dryrun | --no-dryrun]
+#                [--host HOST]
+#                [--password-file FILE]
+#                [--scan | --no-scan]
+#                [--advise [ADVISEMENTS] | --no-advise]
+#                [--cache CACHE_RULES]
+#                [--skip-e2e] [--test NAME] [--help]
+#
+# OPTIONS
+#   --image IMAGE    Docker image to test (positional arg also accepted).
+#   --bucket BUCKET  S3 bucket for backup/restore tests.
+#   --aws-credentials FILE
+#                    Path to AWS credentials file.
+#   --dryrun         Pass --dryrun to the container command.
+#   --no-dryrun      Disable dryrun mode.
+#   --host HOST      Target host for network-dependent tests.
+#   --password-file FILE
+#                    File containing the remote password.
+#   --scan           Run Trivy CVE scan (gating). Default: on.
+#   --no-scan        Skip the Trivy scan.
+#   --advise [LIST]  Advisory scans: dive,grype,scout,coverage,all.
+#   --no-advise      Disable all advisory scans.
+#   --cache CACHE_RULES
+#                    One-run cache controls (reset=all, skip-update=trivy).
+#   --skip-e2e       Skip tests flagged as destructive/end-to-end.
+#   --test NAME      Run only the named test function.
+#   -h|--help        Print this message and exit.
 #
 
 set -euo pipefail
@@ -309,7 +343,7 @@ test_staging_coverage_advise() {
             test/05-backup-encryption.bats \
             test/06-healthcheck.bats \
             test/07-image-metadata.bats \
-            test/08-startup.bats
+            test/08-startup.bats \
         >&2 || true
     echo "PASS '${FUNCNAME[0]}': coverage analysis complete (advisory only)"
 }
@@ -437,6 +471,13 @@ _wait_for_log_pattern() {
     _WAIT_ELAPSED=${_elapsed}
     return 1
 }
+
+# Short-circuit --help before sourcing hooks (works even without hooks file).
+for _arg in "$@"; do
+    if [[ "${_arg}" == "-h" || "${_arg}" == "--help" ]]; then
+        show_help; exit 0
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # Repo-specific helpers and test implementations (staging-hooks.sh)
@@ -678,7 +719,10 @@ _meets_requirement() {
 main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --image)            IMAGE="$2";                 shift ;;
+            --image)
+                [[ -n "${2:-}" ]] || {
+                    echo "Option $1 requires a value" >&2; exit 1; }
+                IMAGE="$2"; shift ;;
             --bucket)           S3_BUCKET_NAME="$2";        shift ;;
             --bucket-list)      BUCKET_LIST="$2";           shift ;;
             --aws-config)       AWS_CONFIG_FILE="$2";       shift ;;
@@ -725,7 +769,10 @@ main() {
                 ;;
             --yes)          _YES=true      ;;
             --skip-e2e)     _SKIP_E2E=true ;;
-            --test)         _ONLY_TEST="$2"; shift ;;
+            --test)
+                [[ -n "${2:-}" ]] || {
+                    echo "Option $1 requires a value" >&2; exit 1; }
+                _ONLY_TEST="$2"; shift ;;
             -h|--help)      show_help; exit 0 ;;
             --host)             HOST="$2";                  shift ;;
             --user)             REMOTE_USER="$2";           shift ;;
@@ -738,8 +785,11 @@ main() {
                 echo "Run 'test/staging --help' for usage." >&2
                 exit 1 ;;
             *)
-                [[ -z "${IMAGE}" ]] && IMAGE="$1" || {
-                    echo "Unexpected argument: $1" >&2; exit 1; }
+                if [[ -z "${IMAGE}" ]]; then
+                    IMAGE="$1"
+                else
+                    echo "Unexpected argument: $1" >&2; exit 1
+                fi
                 ;;
         esac
         shift
