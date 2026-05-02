@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-05-02
+
+### Security
+
+- Suppress five unfixable AL2023 CVEs in `.trivyignore`: `CVE-2026-4046`
+  (glibc iconv DoS), `CVE-2026-3644`, `CVE-2026-4786`, `CVE-2026-6100`
+  (cpython), `CVE-2026-35385` (openssh scp); fix versions are identified
+  by Trivy but not yet available in the AL2023 package repositories
+
+### Changed
+
+- Regenerate `build`, `test/run-all`, `test/staging` from generator
+  commit `27d0e5c`; staging Trivy scan now mounts `.trivyignore` from
+  the repo root, matching the build script's own scan stage
+
 ## [1.0.1] - 2026-04-27
 
 ### Changed
