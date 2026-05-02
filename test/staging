@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# 1121citrus.build-date 2026-05-01T00:52:40Z
-# 1121citrus.build-version 6bbe275c0778
+# 1121citrus.build-date 2026-05-02T14:08:03Z
+# 1121citrus.build-version 27d0e5cfb6f8
 
 # test/staging — functional staging tests for mokerlink-backup.
 #
@@ -79,6 +79,7 @@ _CACHE_RESET_TRIVY=false       # --cache reset=trivy: wipe Trivy DB volume
 _CACHE_RESET_GRYPE=false       # --cache reset=grype: wipe Grype DB volume
 _CACHE_SKIP_UPDATE_TRIVY=false  # --cache skip-update=trivy: keep existing DB
 _CACHE_SKIP_UPDATE_GRYPE=false  # --cache skip-update=grype: keep existing DB
+_TRIVY_IGNOREFILE=.trivyignore
 HOST="${HOST:-}"
 REMOTE_USER="${REMOTE_USER:-}"
 REMOTE_PASSWORD="${REMOTE_PASSWORD:-}"
@@ -95,19 +96,26 @@ _set_cache_targets() {
     for target in "${_tgts[@]}"; do
         case "${target}" in
             trivy)
-                [[ "${mode}" == "reset" ]]       && _CACHE_RESET_TRIVY=true
-                [[ "${mode}" == "skip-update" ]] && _CACHE_SKIP_UPDATE_TRIVY=true
+                if [[ "${mode}" == "reset" ]]; then
+                    _CACHE_RESET_TRIVY=true
+                elif [[ "${mode}" == "skip-update" ]]; then
+                    _CACHE_SKIP_UPDATE_TRIVY=true
+                fi
                 ;;
             grype)
-                [[ "${mode}" == "reset" ]]       && _CACHE_RESET_GRYPE=true
-                [[ "${mode}" == "skip-update" ]] && _CACHE_SKIP_UPDATE_GRYPE=true
+                if [[ "${mode}" == "reset" ]]; then
+                    _CACHE_RESET_GRYPE=true
+                elif [[ "${mode}" == "skip-update" ]]; then
+                    _CACHE_SKIP_UPDATE_GRYPE=true
+                fi
                 ;;
             all)
-                [[ "${mode}" == "reset" ]] && {
-                    _CACHE_RESET_TRIVY=true; _CACHE_RESET_GRYPE=true; }
-                [[ "${mode}" == "skip-update" ]] && {
+                if [[ "${mode}" == "reset" ]]; then
+                    _CACHE_RESET_TRIVY=true; _CACHE_RESET_GRYPE=true
+                elif [[ "${mode}" == "skip-update" ]]; then
                     _CACHE_SKIP_UPDATE_TRIVY=true
-                    _CACHE_SKIP_UPDATE_GRYPE=true; }
+                    _CACHE_SKIP_UPDATE_GRYPE=true
+                fi
                 ;;
             *) echo "Unknown cache target: ${target}" >&2; exit 1 ;;
         esac
@@ -251,13 +259,24 @@ test_staging_trivy_scan() {
     [[ "${_CACHE_SKIP_UPDATE_TRIVY}" == "true" ]] && {
         echo "    Trivy DB update skipped (--cache skip-update=trivy)" >&2
         _extra+=(--skip-db-update --skip-java-db-update); }
+    local _trivyign_v=() _trivyign_a=()
+    if [[ -n "${_TRIVY_IGNOREFILE:-}" ]]; then
+        local _repo_dir
+        _repo_dir="$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")"
+        if [[ -f "${_repo_dir}/${_TRIVY_IGNOREFILE}" ]]; then
+            _trivyign_v+=(-v "${_repo_dir}/${_TRIVY_IGNOREFILE}:/.trivyignore:ro")
+            _trivyign_a+=(--ignorefile /.trivyignore)
+        fi
+    fi
     local result=0
     docker run --rm \
         -v "${_scan_tar}:/scan.tar:ro" \
         -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
+        "${_trivyign_v[@]}" \
         "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
             --quiet --no-progress --exit-code 1 \
             --ignore-unfixed --severity HIGH,CRITICAL \
+            "${_trivyign_a[@]}" \
             --timeout 5m \
             "${_extra[@]}" \
             --input /scan.tar 2>&1 || result=$?
@@ -358,7 +377,7 @@ test_staging_cron_startup() {
         -e "AWS_S3_BUCKET_NAME=test.fake-bucket-for-startup-test" \
         -e "CRON_EXPRESSION=@daily" \
         "${IMAGE}")
-    printf '  container %s started; waiting for scheduler init...\\n' \
+    printf '  container %s started; waiting for scheduler init...\n' \
         "${container_id:0:12}" >&2
 
     sleep 3

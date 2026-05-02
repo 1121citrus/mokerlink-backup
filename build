@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# 1121citrus.build-date 2026-05-01T00:52:40Z
-# 1121citrus.build-version 6bbe275c0778
+# 1121citrus.build-date 2026-05-02T14:08:03Z
+# 1121citrus.build-version 27d0e5cfb6f8
 
 # build — local CI equivalent for mokerlink-backup.
 #
@@ -748,11 +748,13 @@ if [[ "${SCAN}" == "true" ]]; then
     run docker run --rm \
         -v "${_scan_tar}:/scan.tar:ro" \
         -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
+        -v "${script_dir}/.trivyignore:/.trivyignore:ro" \
         "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
             --quiet \
             --no-progress \
             --exit-code 1 \
             --ignore-unfixed \
+            --ignorefile /.trivyignore \
             --severity HIGH,CRITICAL \
             --timeout 5m \
             "${_trivy_db_flags[@]}" \

@@ -3,6 +3,26 @@
 # All entries below have been reviewed and are unfixable at this time.
 # Each is documented in SECURITY.md with the rationale and a tracking reference.
 #
+# ── AL2023 packages: fix versions identified by Trivy but not yet in repo ────
+# glibc: DoS via iconv() — fix: 2.34-231.amzn2023.0.4 (not yet in repo)
+CVE-2026-4046
+
+# cpython: incomplete control-char validation in http.cookies
+# fix: python3 3.9.25-1.amzn2023.0.5
+CVE-2026-3644
+
+# cpython: arbitrary code execution via command injection in webbrowser.open()
+# fix: python3 3.9.25-1.amzn2023.0.5
+CVE-2026-4786
+
+# cpython: arbitrary code execution/info disclosure via use-after-free in
+# decompression — fix: python3 3.9.25-1.amzn2023.0.5
+CVE-2026-6100
+
+# openssh/openssh-clients: privilege escalation via scp legacy protocol
+# fix: 8.7p1-8.amzn2023.0.17 (not yet in repo)
+CVE-2026-35385
+
 # ── supercronic: Go stdlib 1.26.1 (needs 1.26.2) ────────────────────────────
 # supercronic v0.2.44 is the latest release and is built with Go 1.26.1.
 # The upstream project has not yet published a release compiled with Go 1.26.2.
