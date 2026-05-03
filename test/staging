@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# 1121citrus.build-date 2026-05-02T14:08:03Z
-# 1121citrus.build-version 27d0e5cfb6f8
+# 1121citrus.build-date 2026-05-03T20:04:25Z
+# 1121citrus.build-version a03f97bf0585
 
 # test/staging — functional staging tests for mokerlink-backup.
 #
@@ -46,9 +46,9 @@ BATS_KCOV_TAG=latest
 DIVE_IMAGE=wagoodman/dive
 DIVE_TAG=v0.13.1
 GRYPE_IMAGE=anchore/grype
-GRYPE_TAG=v0.87.0
+GRYPE_TAG=v0.112.0
 TRIVY_IMAGE=aquasec/trivy
-TRIVY_TAG=0.62.1
+TRIVY_TAG=0.70.0
 ALPINE_IMAGE=alpine
 ALPINE_TAG=3.21
 

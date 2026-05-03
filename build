@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# 1121citrus.build-date 2026-05-02T14:08:03Z
-# 1121citrus.build-version 27d0e5cfb6f8
+# 1121citrus.build-date 2026-05-03T20:04:25Z
+# 1121citrus.build-version a03f97bf0585
 
 # build — local CI equivalent for mokerlink-backup.
 #
@@ -41,7 +41,8 @@
 #                       --advise after --no-scan to keep them.
 #   --advise [ADVISEMENTS]
 #                       Run advisory scans. Comma-delimited list:
-#                       'dive', 'coverage', 'all', 'none', or any combination.
+#                       'dive', 'coverage', 'gitleaks', 'all', 'none',
+#                       or any combination.
 #                       'all' selects every available advisement.
 #                       'none' disables all (equivalent to --no-advise).
 #                       Default with no list given: 'all'.
@@ -138,6 +139,7 @@ SCAN_GRYPE=${BUILD_SCAN_GRYPE:-true}
 SCAN_SCOUT=${BUILD_SCAN_SCOUT:-true}
 ADVISE_DIVE=false
 ADVISE_COVERAGE=false
+ADVISE_GITLEAKS=false
 _ADVISE_EXPLICIT=false   # set true when --advise or --no-advise is passed
 CACHE_RESET_TRIVY=false
 CACHE_RESET_GRYPE=false
@@ -169,15 +171,17 @@ DIVE_DOCKER_CLIENT_API=1.47
 DIVE_IMAGE=wagoodman/dive
 DIVE_TAG=v0.13.1
 GRYPE_IMAGE=anchore/grype
-GRYPE_TAG=v0.87.0
+GRYPE_TAG=v0.112.0
 HADOLINT_IMAGE=hadolint/hadolint
-HADOLINT_TAG=v2.12.0
+HADOLINT_TAG=v2.14.0
 MARKDOWNLINT_IMAGE=ghcr.io/igorshubovych/markdownlint-cli
 MARKDOWNLINT_TAG=v0.48.0
 SHELLCHECK_IMAGE=koalaman/shellcheck
-SHELLCHECK_TAG=v0.10.0
+SHELLCHECK_TAG=v0.11.0
 TRIVY_IMAGE=aquasec/trivy
-TRIVY_TAG=0.62.1
+TRIVY_TAG=0.70.0
+GITLEAKS_IMAGE=zricethezav/gitleaks
+GITLEAKS_TAG=v8.24.2
 
 TRIVY_CACHE_VOLUME=mokerlink-backup-trivy-cache
 GRYPE_CACHE_VOLUME=mokerlink-backup-grype-cache
@@ -480,6 +484,7 @@ while [[ $# -gt 0 ]]; do
             # Parse the comma-delimited list
             ADVISE_DIVE=false
             ADVISE_COVERAGE=false
+            ADVISE_GITLEAKS=false
             IFS=',' read -ra adv_list <<< "$advisements"
             for adv in "${adv_list[@]}"; do
                 adv="${adv//[[:space:]]/}"
@@ -487,13 +492,16 @@ while [[ $# -gt 0 ]]; do
                 case "$adv" in
                     coverage) ADVISE_COVERAGE=true ;;
                     dive)     ADVISE_DIVE=true ;;
+                    gitleaks) ADVISE_GITLEAKS=true ;;
                     all)
                         ADVISE_DIVE=true
                         ADVISE_COVERAGE=true
+                        ADVISE_GITLEAKS=true
                         ;;
                     none)
                         ADVISE_DIVE=false
                         ADVISE_COVERAGE=false
+                        ADVISE_GITLEAKS=false
                         ;;
                     *)  echo "Unknown advisement: $adv" >&2; exit 1 ;;
                 esac
@@ -502,6 +510,7 @@ while [[ $# -gt 0 ]]; do
         --no-advise)
             ADVISE_DIVE=false
             ADVISE_COVERAGE=false
+            ADVISE_GITLEAKS=false
             _ADVISE_EXPLICIT=true
             ;;
         --cache)
@@ -530,6 +539,7 @@ done
 if [[ "${SCAN}" == "false" && "${_ADVISE_EXPLICIT}" == "false" ]]; then
     ADVISE_DIVE=false
     ADVISE_COVERAGE=false
+    ADVISE_GITLEAKS=false
 fi
 
 # ---------------------------------------------------------------------------
@@ -910,6 +920,28 @@ if [[ "${ADVISE_COVERAGE}" == "true" ]]; then
                 test/07-image-metadata.bats \
                 test/08-startup.bats \
             >&2 || echo "    Coverage run failed (advisory only)" >&2
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 5e: Advise (gitleaks — non-gating)
+# Scans the repository working tree for potential secrets.
+# ---------------------------------------------------------------------------
+if [[ "${ADVISE_GITLEAKS}" == "true" ]]; then
+    echo "==> Stage 5e: Advise (gitleaks)" >&2
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        echo "[DRY RUN] docker run --rm -v ${script_dir}:/repo:ro ${GITLEAKS_IMAGE}:${GITLEAKS_TAG} dir /repo --no-banner --redact --exit-code 1" >&2
+    else
+        set +e
+        docker run --rm \
+            -v "${script_dir}:/repo:ro" \
+            "${GITLEAKS_IMAGE}:${GITLEAKS_TAG}" \
+                dir /repo --no-banner --redact --exit-code 1
+        _gitleaks_status=$?
+        set -e
+        if [[ ${_gitleaks_status} -ne 0 ]]; then
+            echo "    gitleaks reported findings (advisory only)" >&2
+        fi
     fi
 fi
 
