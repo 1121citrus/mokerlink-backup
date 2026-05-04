@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# 1121citrus.build-date 2026-05-03T20:04:25Z
-# 1121citrus.build-version a03f97bf0585
+# 1121citrus.build-date 2026-05-04T00:23:20Z
+# 1121citrus.build-version bb2b9a0df3a1
 
 # test/staging — functional staging tests for mokerlink-backup.
 #
@@ -324,16 +324,31 @@ test_staging_scout_advise() {
 # test_staging_dive_advise — run a Dive image-layer analysis against the
 # staged image archive.  Skipped when _ADVISE_DIVE is not "true".  Never
 # returns non-zero (advisory only); analysis output goes to stdout for the log.
+# Inefficient-file entries smaller than DIVE_MIN_WASTED_BYTES (default 1000000)
+# are filtered from the output.
 # Args: none (uses _scan_tar, DIVE_* globals)
 test_staging_dive_advise() {
     [[ "${_ADVISE_DIVE}" == "true" ]] || {
         _skip "--no-advise dive: Dive layer analysis skipped"; return 0; }
     printf '  running Dive layer analysis on %s...\n' "${IMAGE}" >&2
+    local _min_bytes="${DIVE_MIN_WASTED_BYTES:-1000000}"
     docker run --rm \
         -v "${_scan_tar}:/scan.tar:ro" \
         "${DIVE_IMAGE}:${DIVE_TAG}" \
             --source docker-archive --ci \
-            /scan.tar 2>&1 || true
+            /scan.tar 2>&1 \
+        | awk -v min_b="${_min_bytes}" '
+            /^Inefficient Files:/ { in_sec = 1; print; next }
+            in_sec && $1 ~ /^[0-9]+$/ && NF >= 3 {
+                val = $2 + 0; unit = $3
+                if (unit == "GB") bytes = val * 1000000000
+                else if (unit == "MB") bytes = val * 1000000
+                else if (unit == "kB") bytes = val * 1000
+                else bytes = val
+                if (bytes >= min_b) print
+                next
+            }
+            { print }' || true
     echo "PASS '${FUNCNAME[0]}': Dive layer analysis complete (advisory only)"
 }
 
