@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# 1121citrus.build-date 2026-05-04T00:23:20Z
-# 1121citrus.build-version bb2b9a0df3a1
 
 # build — local CI equivalent for mokerlink-backup.
 #
@@ -41,8 +39,8 @@
 #                       --advise after --no-scan to keep them.
 #   --advise [ADVISEMENTS]
 #                       Run advisory scans. Comma-delimited list:
-#                       'dive', 'coverage', 'gitleaks', 'all', 'none',
-#                       or any combination.
+#                       'churn', 'coverage', 'dive', 'metrics', 'security',
+#                       'all', 'none', or any combination.
 #                       'all' selects every available advisement.
 #                       'none' disables all (equivalent to --no-advise).
 #                       Default with no list given: 'all'.
@@ -89,8 +87,11 @@
 #   4b. Scan      — Grype full-severity scan (gating)
 #   4c. Scan      — Docker Scout CVE scan (gating)
 #   5.  Advise    — advisory scans (never block the build)
-#              a) Dive     — image layer analysis
-#              b) Coverage — kcov line-coverage report
+#              a) Dive       — image layer analysis
+#              b) Coverage   — kcov line-coverage report
+#              f) Metrics    — scc code-metrics summary
+#              g) Security   — graudit pattern scan
+#              h) Churn      — code-maat revision analysis
 #   6.  Push      — multi-platform rebuild + push (only with --push)
 #
 # EXAMPLES
@@ -137,9 +138,11 @@ set -euo pipefail
 SCAN=${BUILD_SCAN:-true}
 SCAN_GRYPE=${BUILD_SCAN_GRYPE:-true}
 SCAN_SCOUT=${BUILD_SCAN_SCOUT:-true}
+ADVISE_CHURN=false
 ADVISE_DIVE=false
+ADVISE_METRICS=false
+ADVISE_SECURITY=false
 ADVISE_COVERAGE=false
-ADVISE_GITLEAKS=false
 _ADVISE_EXPLICIT=false   # set true when --advise or --no-advise is passed
 CACHE_RESET_TRIVY=false
 CACHE_RESET_GRYPE=false
@@ -170,18 +173,20 @@ BATS_KCOV_TAG=latest
 DIVE_DOCKER_CLIENT_API=1.47
 DIVE_IMAGE=wagoodman/dive
 DIVE_TAG=v0.13.1
+CODE_MAAT_IMAGE=adamtornhill/code-maat
+CODE_MAAT_TAG=latest
 GRYPE_IMAGE=anchore/grype
 GRYPE_TAG=v0.112.0
 HADOLINT_IMAGE=hadolint/hadolint
 HADOLINT_TAG=v2.14.0
 MARKDOWNLINT_IMAGE=ghcr.io/igorshubovych/markdownlint-cli
 MARKDOWNLINT_TAG=v0.48.0
+SCC_IMAGE=ghcr.io/boyter/scc
+SCC_TAG=master
 SHELLCHECK_IMAGE=koalaman/shellcheck
 SHELLCHECK_TAG=v0.11.0
 TRIVY_IMAGE=aquasec/trivy
 TRIVY_TAG=0.70.0
-GITLEAKS_IMAGE=zricethezav/gitleaks
-GITLEAKS_TAG=v8.24.2
 
 TRIVY_CACHE_VOLUME=mokerlink-backup-trivy-cache
 GRYPE_CACHE_VOLUME=mokerlink-backup-grype-cache
@@ -482,35 +487,45 @@ while [[ $# -gt 0 ]]; do
                 advisements="all"
             fi
             # Parse the comma-delimited list
+            ADVISE_CHURN=false
             ADVISE_DIVE=false
+            ADVISE_METRICS=false
+            ADVISE_SECURITY=false
             ADVISE_COVERAGE=false
-            ADVISE_GITLEAKS=false
             IFS=',' read -ra adv_list <<< "$advisements"
             for adv in "${adv_list[@]}"; do
                 adv="${adv//[[:space:]]/}"
                 adv="${adv,,}"
                 case "$adv" in
+                    churn)    ADVISE_CHURN=true ;;
                     coverage) ADVISE_COVERAGE=true ;;
                     dive)     ADVISE_DIVE=true ;;
-                    gitleaks) ADVISE_GITLEAKS=true ;;
+                    metrics)  ADVISE_METRICS=true ;;
+                    security) ADVISE_SECURITY=true ;;
                     all)
+                        ADVISE_CHURN=true
                         ADVISE_DIVE=true
+                        ADVISE_METRICS=true
+                        ADVISE_SECURITY=true
                         ADVISE_COVERAGE=true
-                        ADVISE_GITLEAKS=true
                         ;;
                     none)
+                        ADVISE_CHURN=false
                         ADVISE_DIVE=false
+                        ADVISE_METRICS=false
+                        ADVISE_SECURITY=false
                         ADVISE_COVERAGE=false
-                        ADVISE_GITLEAKS=false
                         ;;
                     *)  echo "Unknown advisement: $adv" >&2; exit 1 ;;
                 esac
             done
             ;;
         --no-advise)
+            ADVISE_CHURN=false
             ADVISE_DIVE=false
+            ADVISE_METRICS=false
+            ADVISE_SECURITY=false
             ADVISE_COVERAGE=false
-            ADVISE_GITLEAKS=false
             _ADVISE_EXPLICIT=true
             ;;
         --cache)
@@ -537,9 +552,11 @@ done
 
 # --no-scan implies --no-advise unless --advise was given explicitly.
 if [[ "${SCAN}" == "false" && "${_ADVISE_EXPLICIT}" == "false" ]]; then
+    ADVISE_CHURN=false
     ADVISE_DIVE=false
+    ADVISE_METRICS=false
+    ADVISE_SECURITY=false
     ADVISE_COVERAGE=false
-    ADVISE_GITLEAKS=false
 fi
 
 # ---------------------------------------------------------------------------
@@ -613,7 +630,7 @@ if [[ "${LINT}" == "true" ]]; then
     fi
 
     echo "    shellcheck bash scripts" >&2
-    (cd "${script_dir}" && docker run --rm \
+    (cd "${script_dir}" && run docker run --rm \
         -v "${script_dir}:/mnt" \
         --workdir /mnt \
         "${SHELLCHECK_IMAGE}:${SHELLCHECK_TAG}" \
@@ -633,7 +650,7 @@ if [[ "${LINT}" == "true" ]]; then
             test/bin/*)
 
     echo "    markdownlint **/*.md" >&2
-    docker run --rm \
+    run docker run --rm \
         -v "${script_dir}:/md:ro" \
         --workdir /md \
         "${MARKDOWNLINT_IMAGE}:${MARKDOWNLINT_TAG}" \
@@ -685,15 +702,12 @@ if [[ "${TEST}" == "true" ]]; then
         "${script_dir}/test/06-healthcheck.bats" \
         "${script_dir}/test/staging" \
         "${script_dir}/test/bin/"*
-    if [[ "${DRY_RUN}" == "true" ]]; then
-        echo "[DRY RUN] ./test/run-all" >&2
-    elif [[ -x "${script_dir}/test/run-all" ]]; then
-        (cd "${script_dir}" && env IMAGE="${full_image}:${VERSION}" TEST_SUMMARY_JSON="${TEST_SUMMARY_JSON}" ./test/run-all)
-        write_build_report
+    if [[ -x "${script_dir}/test/run-all" ]]; then
+        (cd "${script_dir}" && env IMAGE="${full_image}:${VERSION}" TEST_SUMMARY_JSON="${TEST_SUMMARY_JSON}" run ./test/run-all)
     else
     (cd "${script_dir}" && IMAGE="${full_image}:${VERSION}" run ./test/run-all)
-        write_build_report
     fi
+    write_build_report
 fi
 
 # ---------------------------------------------------------------------------
@@ -827,7 +841,7 @@ fi
 if [[ "${SCAN_SCOUT}" == "true" ]]; then
     echo "==> Stage 4c: Scan (Scout) ${full_image}:${VERSION}" >&2
     if [[ "${DRY_RUN}" == "true" ]]; then
-        echo "[DRY RUN] docker scout cves ${full_image}:${VERSION}" >&2
+        run docker scout cves "${full_image}:${VERSION}"
     else
         set +e
         _scout_out=$(docker scout cves "${full_image}:${VERSION}" 2>&1)
@@ -860,33 +874,29 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "${ADVISE_DIVE}" == "true" ]]; then
     echo "==> Stage 5c: Advise (Dive) ${full_image}:${VERSION}" >&2
-    if [[ "${DRY_RUN}" == "true" ]]; then
-        echo "[DRY RUN] docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro ${DIVE_IMAGE}:${DIVE_TAG} --source docker --ci --ci-config /.dive-ci ${full_image}:${VERSION}" >&2
+    daemon_min_api=$(docker version \
+        --format '{{.Server.MinAPIVersion}}' 2>/dev/null || true)
+    if [[ -n "${daemon_min_api}" ]] \
+        && [[ "$(printf '%s\n' \
+                "${DIVE_DOCKER_CLIENT_API}" \
+                "${daemon_min_api}" \
+                | sort -V | tail -n1)" == "${daemon_min_api}" ]] \
+        && [[ "${daemon_min_api}" != "${DIVE_DOCKER_CLIENT_API}" ]]; then
+        echo "    Skipping Dive: daemon requires API >= ${daemon_min_api}," \
+             "but ${DIVE_IMAGE}:${DIVE_TAG} uses ${DIVE_DOCKER_CLIENT_API}." >&2
     else
-        daemon_min_api=$(docker version \
-            --format '{{.Server.MinAPIVersion}}' 2>/dev/null || true)
-        if [[ -n "${daemon_min_api}" ]] \
-            && [[ "$(printf '%s\n' \
-                    "${DIVE_DOCKER_CLIENT_API}" \
-                    "${daemon_min_api}" \
-                    | sort -V | tail -n1)" == "${daemon_min_api}" ]] \
-            && [[ "${daemon_min_api}" != "${DIVE_DOCKER_CLIENT_API}" ]]; then
-            echo "    Skipping Dive: daemon requires API >= ${daemon_min_api}," \
-                 "but ${DIVE_IMAGE}:${DIVE_TAG} uses ${DIVE_DOCKER_CLIENT_API}." >&2
-        else
-            _dive_ci_config=()
-            if [[ -f "${script_dir}/.dive-ci" ]]; then
-                _dive_ci_config=(-v "${script_dir}/.dive-ci:/.dive-ci:ro")
-            fi
-            docker run --rm \
-                -v /var/run/docker.sock:/var/run/docker.sock:ro \
-                "${_dive_ci_config[@]}" \
-                "${DIVE_IMAGE}:${DIVE_TAG}" \
-                    --source docker \
-                    --ci \
-                    --ci-config /.dive-ci \
-                    "${full_image}:${VERSION}" || true
+        _dive_ci_config=()
+        if [[ -f "${script_dir}/.dive-ci" ]]; then
+            _dive_ci_config=(-v "${script_dir}/.dive-ci:/.dive-ci:ro")
         fi
+        run docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            "${_dive_ci_config[@]}" \
+            "${DIVE_IMAGE}:${DIVE_TAG}" \
+                --source docker \
+                --ci \
+                --ci-config /.dive-ci \
+                "${full_image}:${VERSION}" || true
     fi
 fi
 
@@ -924,25 +934,74 @@ if [[ "${ADVISE_COVERAGE}" == "true" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Stage 5e: Advise (gitleaks — non-gating)
-# Scans the repository working tree for potential secrets.
+# Stage 5f: Advise (scc — code metrics)
+# Counts source lines by language.  Results printed to stderr.
+# Never blocks the build.
 # ---------------------------------------------------------------------------
-if [[ "${ADVISE_GITLEAKS}" == "true" ]]; then
-    echo "==> Stage 5e: Advise (gitleaks)" >&2
-    if [[ "${DRY_RUN}" == "true" ]]; then
-        echo "[DRY RUN] docker run --rm -v ${script_dir}:/repo:ro ${GITLEAKS_IMAGE}:${GITLEAKS_TAG} dir /repo --no-banner --redact --exit-code 1" >&2
+if [[ "${ADVISE_METRICS}" == "true" ]]; then
+    echo "==> Stage 5f: Advise (metrics) ${full_image}:${VERSION}" >&2
+    docker run --rm \
+        -v "${script_dir}:/data:ro" \
+        "${SCC_IMAGE}:${SCC_TAG}" \
+        --by-file /data >&2 || true
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 5g: Advise (graudit — security pattern scan)
+# Clones graudit at runtime, scans src/ with bash+strings signatures.
+# Results printed to stderr.  Never blocks the build.
+# ---------------------------------------------------------------------------
+if [[ "${ADVISE_SECURITY}" == "true" ]]; then
+    echo "==> Stage 5g: Advise (security) ${full_image}:${VERSION}" >&2
+    _graudit_tmp=$(mktemp -d /tmp/graudit-XXXXXX)
+    # shellcheck disable=SC2064
+    trap "rm -rf '${_graudit_tmp}'" EXIT
+    if git clone --quiet --depth 1 \
+            https://github.com/wireghoul/graudit.git \
+            "${_graudit_tmp}/graudit" >&2; then
+        _shim_dir="${_graudit_tmp}/shim"
+        mkdir -p "${_shim_dir}"
+        _real_grep=$(command -v grep)
+        printf '#!/bin/sh\nexec "%s" --exclude-dir=node_modules --exclude-dir=__pycache__ --exclude-dir=.venv "$@"\n' \
+            "${_real_grep}" > "${_shim_dir}/grep"
+        printf '#!/bin/sh\nexec "%s" -E --exclude-dir=node_modules --exclude-dir=__pycache__ --exclude-dir=.venv "$@"\n' \
+            "${_real_grep}" > "${_shim_dir}/egrep"
+        chmod +x "${_shim_dir}/grep" "${_shim_dir}/egrep"
+        PATH="${_shim_dir}:${PATH}" \
+            "${_graudit_tmp}/graudit/graudit" \
+                -d bash -d strings \
+                "${script_dir}/src" >&2 || true
     else
-        set +e
-        docker run --rm \
-            -v "${script_dir}:/repo:ro" \
-            "${GITLEAKS_IMAGE}:${GITLEAKS_TAG}" \
-                dir /repo --no-banner --redact --exit-code 1
-        _gitleaks_status=$?
-        set -e
-        if [[ ${_gitleaks_status} -ne 0 ]]; then
-            echo "    gitleaks reported findings (advisory only)" >&2
-        fi
+        echo "    Security scan skipped: graudit clone failed" >&2
     fi
+    rm -rf "${_graudit_tmp}"
+    trap - EXIT
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 5h: Advise (code-maat — churn / revision analysis)
+# Generates git log and runs code-maat to surface high-churn files.
+# Results printed to stderr.  Never blocks the build.
+# ---------------------------------------------------------------------------
+if [[ "${ADVISE_CHURN}" == "true" ]]; then
+    echo "==> Stage 5h: Advise (churn) ${full_image}:${VERSION}" >&2
+    _churn_log=$(mktemp /tmp/churn-log-XXXXXX)
+    # shellcheck disable=SC2064
+    trap "rm -f '${_churn_log}'" EXIT
+    git -C "${script_dir}" log \
+        --all --numstat --date=short \
+        --pretty=format:'--%h--%ad--%s' \
+        > "${_churn_log}" 2>/dev/null || true
+    if [[ -s "${_churn_log}" ]]; then
+        docker run --rm \
+            -v "${_churn_log}:/data/git.log:ro" \
+            "${CODE_MAAT_IMAGE}:${CODE_MAAT_TAG}" \
+            -l /data/git.log -c git2 -a revisions >&2 || true
+    else
+        echo "    Churn analysis skipped: no git log data" >&2
+    fi
+    rm -f "${_churn_log}"
+    trap - EXIT
 fi
 
 # ---------------------------------------------------------------------------
