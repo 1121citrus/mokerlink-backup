@@ -5,6 +5,10 @@ A CLI tool to download configuration backups from a [Mokerlink managed network s
 ## Contents
 
 - [Contents](#contents)
+- [Bootstrap a factory-reset switch](#bootstrap-a-factory-reset-switch)
+  - [Serial console (recommended for first boot)](#serial-console-recommended-for-first-boot)
+  - [HTTP web UI (no serial cable needed)](#http-web-ui-no-serial-cable-needed)
+  - [SSH transports (running switch only)](#ssh-transports-running-switch-only)
 - [Synopsis](#synopsis)
 - [CLI Usage](#cli-usage)
 - [Examples](#examples)
@@ -21,6 +25,99 @@ A CLI tool to download configuration backups from a [Mokerlink managed network s
   - [Legacy service parameters](#legacy-service-parameters)
 - [Building](#building)
 - [Security](#security)
+
+## Bootstrap a factory-reset switch
+
+`mokerlink-restore` pushes a configuration file to a Mokerlink switch and
+reboots it.  Four transport mechanisms are supported; choose based on what
+hardware is available.
+
+| Transport  | Cable required                | SSH needed | TFTP server        | `sudo`        |
+|------------|-------------------------------|------------|--------------------|---------------|
+| `serial`   | USB-to-serial + console cable | No         | Yes (auto-started) | Yes (port 69) |
+| `http`     | Ethernet only                 | No         | No                 | No            |
+| `ssh`      | Ethernet only                 | Yes        | Yes (auto-started) | Yes (port 69) |
+| `ssh-cmd`  | Ethernet only                 | Yes        | No                 | No            |
+
+### Serial console (recommended for first boot)
+
+The serial transport works on any factory-reset switch regardless of whether
+SSH or the web UI is reachable.  It requires:
+
+- A USB-to-serial adapter and the RJ45 console cable that shipped with the
+  switch
+- `sudo` access on the bootstrap machine (TFTP uses port 69/UDP)
+- The laptop configured with a `192.168.2.x` address on the directly-connected
+  interface (the switch defaults to `192.168.2.1`)
+
+**Steps:**
+
+1. Connect the console cable from the USB adapter to the switch's console port.
+
+2. Connect an Ethernet cable from the laptop to any switch port.
+
+3. Set the laptop's Ethernet interface to a static address in `192.168.2.0/24`
+   (any address other than `192.168.2.1`).
+
+4. Run the restore command:
+
+   ```console
+   $ sudo mokerlink-restore --transport serial --config start-config.cfg
+   ```
+
+   The script auto-detects the serial port (`/dev/cu.usbserial-*` on macOS,
+   `/dev/ttyUSB0` on Linux).  Use `--port /dev/cu.usbserial-XXXX` to specify
+   it explicitly.
+
+5. The script starts a TFTP server, opens the console session, pushes the
+   config, reboots the switch, and waits for it to come back up.  The whole
+   process takes about two minutes.
+
+**Options:**
+
+```text
+sudo mokerlink-restore \
+    --transport serial \
+    --config start-config.cfg \
+    [--host 192.168.2.1]         # default
+    [--port /dev/cu.usbserial-0] # default: auto-detect
+    [--user admin]               # default
+    [--password admin]           # default: factory default
+    [--no-reboot]                # push config only; do not reboot
+    [--no-wait]                  # do not wait for restart
+```
+
+### HTTP web UI (no serial cable needed)
+
+> **Note:** The HTTP transport requires one-time endpoint discovery against a
+> live switch using browser developer tools.  See `doc/http-endpoints.md` once
+> that document is created (Phase D).
+
+### SSH transports (running switch only)
+
+The `ssh` and `ssh-cmd` transports require SSH to be enabled on the switch.
+SSH is **not** enabled on factory-reset units; use `serial` or `http` for
+first boot.
+
+**`ssh` transport** (requires a TFTP server; `sudo` needed for port 69):
+
+```console
+$ sudo mokerlink-restore \
+    --transport ssh \
+    --config start-config.cfg \
+    --host switch-1 \
+    --password-file /run/secrets/mokerlink-password
+```
+
+**`ssh-cmd` transport** (no TFTP server; no `sudo` needed):
+
+```console
+$ mokerlink-restore \
+    --transport ssh-cmd \
+    --config start-config.cfg \
+    --host switch-1 \
+    --password-file /run/secrets/mokerlink-password
+```
 
 ## Synopsis
 
