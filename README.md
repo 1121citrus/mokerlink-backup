@@ -361,32 +361,32 @@ $ aws s3 cp --quiet s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.2
 
 ### CLI parameters
 
-Parameter | Option | Environment variable | Default | Notes
---- | --- | --- | --- | ---
-Host | `-H`,`--host` | `MOKERLINK_HOST` | `${TAILSCALE_HOST}` | Hostname or IP of the switch. `MOKERLINK_HOST` overrides `TAILSCALE_HOST`.
-User | `-u`,`--user` | `MOKERLINK_USER` | `remote-backup` | SSH username.
-Password | `-p`,`--password` | `MOKERLINK_PASSWORD` | _none_ | Switch login password. Prefer `--password-file`.
-Password file | `-P`,`--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` | File containing the password. Intended as a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/).
-Format | `-f`,`--format` | `MOKERLINK_FORMAT` | `tar` | Output format: `raw` or `tar`.
-Tailscale host | — | `TAILSCALE_HOST` | _none_ | Fallback hostname when `MOKERLINK_HOST` is unset.
-Debug | — | `DEBUG` | `false` | Set to `true` to enable `xtrace`/`verbose`. **WARNING:** exposes passwords in logs.
+| Parameter | Option | Environment variable | Default | Notes |
+| --- | --- | --- | --- | --- |
+| Host | `-H`,`--host` | `MOKERLINK_HOST` | `${TAILSCALE_HOST}` | Hostname or IP of the switch. `MOKERLINK_HOST` overrides `TAILSCALE_HOST`. |
+| User | `-u`,`--user` | `MOKERLINK_USER` | `remote-backup` | SSH username. |
+| Password | `-p`,`--password` | `MOKERLINK_PASSWORD` | _none_ | Switch login password. Prefer `--password-file`. |
+| Password file | `-P`,`--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` | File containing the password. Intended as a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/). |
+| Format | `-f`,`--format` | `MOKERLINK_FORMAT` | `tar` | Output format: `raw` or `tar`. |
+| Tailscale host | — | `TAILSCALE_HOST` | _none_ | Fallback hostname when `MOKERLINK_HOST` is unset. |
+| Debug | — | `DEBUG` | `false` | Set to `true` to enable `xtrace`/`verbose`. **WARNING:** exposes passwords in logs. |
 
 ### Legacy service parameters
 
 These environment variables are used by the `startup` and `backup` scripts
 when the image runs as a Docker Compose service.
 
-Variable | Default | Notes
---- | --- | ---
-`AWS_CONFIG_FILE` | `/run/secrets/aws-config` | AWS credentials file. Intended as a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/).
-`AWS_DRYRUN` | `false` | Set to `true` to pass `--dryrun` to AWS CLI commands.
-`AWS_S3_BUCKET_NAME` | _required_ | S3 bucket for uploads. May include a path prefix, e.g. `your-bucket/backups/daily` (no trailing `/`).
-`COMPRESSION` | `none` | Compression algorithm: `bzip`, `bzip2`, `bzip3`, `gz`, `gzip`, `lzma`, `lzo`, `lzop`, `none`, `pigz`, `pixz`, `xz`, `zip`.
-`CRON_EXPRESSION` | `@daily` | Standard cron expression. See [crontab.guru](https://crontab.guru/).
-`GPG_CIPHER_ALGO` | `aes256` | GnuPG symmetric encryption cipher.
-`GPG_PASSPHRASE` | _none_ | GnuPG passphrase. Prefer `GPG_PASSPHRASE_FILE`.
-`GPG_PASSPHRASE_FILE` | `/run/secrets/gpg-passphrase` | File containing the GnuPG passphrase. Intended as a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/).
-`TZ` | `UTC` | Timezone for cron scheduling, e.g. `America/New_York`.
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `AWS_CONFIG_FILE` | `/run/secrets/aws-config` | AWS credentials file. Intended as a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/). |
+| `AWS_DRYRUN` | `false` | Set to `true` to pass `--dryrun` to AWS CLI commands. |
+| `AWS_S3_BUCKET_NAME` | _required_ | S3 bucket for uploads. May include a path prefix, e.g. `your-bucket/backups/daily` (no trailing `/`). |
+| `COMPRESSION` | `none` | Compression algorithm: `bzip`, `bzip2`, `bzip3`, `gz`, `gzip`, `lzma`, `lzo`, `lzop`, `none`, `pigz`, `pixz`, `xz`, `zip`. |
+| `CRON_EXPRESSION` | `@daily` | Standard cron expression. See [crontab.guru](https://crontab.guru/). |
+| `GPG_CIPHER_ALGO` | `aes256` | GnuPG symmetric encryption cipher. |
+| `GPG_PASSPHRASE` | _none_ | GnuPG passphrase. Prefer `GPG_PASSPHRASE_FILE`. |
+| `GPG_PASSPHRASE_FILE` | `/run/secrets/gpg-passphrase` | File containing the GnuPG passphrase. Intended as a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/). |
+| `TZ` | `UTC` | Timezone for cron scheduling, e.g. `America/New_York`. |
 
 ---
 

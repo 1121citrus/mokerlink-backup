@@ -151,42 +151,119 @@ docker buildx imagetools inspect 1121citrus/mokerlink-backup:<version> \
     --format '{{json .Provenance}}'
 ```
 
-## CVE status (last reviewed 2026-04-27)
+## CVE status (last reviewed 2026-05-17)
 
-Advisory scans are run with Grype and Docker Scout in addition to the gating
-Trivy scan.
+Three scanners run on every build:
+
+| Scanner | Role | Blocks build? |
+| --- | --- | --- |
+| Trivy | Gating (`--exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL`) | Yes |
+| Grype | Advisory (full severity, informational output) | No |
+| Docker Scout | Advisory (full severity, informational output) | No |
 
 ### Trivy (gating scan)
 
 | Result | Notes |
 | --- | --- |
-| **0 vulnerabilities** | Gating scan passes; build is not blocked. |
+| **0 vulnerabilities** | All findings are either absent, unfixed upstream (suppressed by `--ignore-unfixed`), or explicitly accepted in `.trivyignore`. |
 
-### Open vulnerabilities
+### Open vulnerabilities — accepted and documented
 
-None. The migration to Amazon Linux 2023 (v1.0.1, 2026-04-27) resolved all
-previously documented Alpine-specific CVEs. CI runs Trivy, Grype, and Docker
-Scout on every push; any new findings will be tracked here.
+The entries below appear in Grype and/or Scout but cannot be fixed at this time.
+Each one is logged in `.trivyignore` with a rationale comment.
+
+#### urllib3 — RPM version 1.25.10 (system package)
+
+The AL2023 RPM `python3-urllib3-1.25.10` coexists with the pip-installed
+`urllib3-2.6.3`. Python scripts use the pip version (higher path priority); the
+RPM is present only to satisfy system-package metadata. No RPM upgrade is
+available in the AL2023 repository.
+
+| CVE | Severity | Description | Fix version |
+| --- | --- | --- | --- |
+| CVE-2021-33503 | HIGH | Uncontrolled resource consumption | 1.26.5 (no RPM fix) |
+| CVE-2023-43804 | HIGH | Sensitive info exposure via cookie headers | 1.26.17 (no RPM fix) |
+| CVE-2025-66418 | HIGH | Allocation without limits (amplification) | 2.6.0 (no RPM fix) |
+| CVE-2025-66471 | HIGH | Data amplification | 2.6.0 (no RPM fix) |
+| CVE-2026-21441 | HIGH | Data amplification | 2.6.3 (no RPM fix) |
+| CVE-2026-44431 | HIGH | Sensitive info exposure | 2.7.0 (no RPM fix) |
+
+#### urllib3 — pip version 2.6.3
+
+| CVE | Severity | Description | Fix version | Status |
+| --- | --- | --- | --- | --- |
+| CVE-2026-44431 | HIGH | Sensitive info exposure | 2.7.0 | urllib3 2.7.0 not installable with pip 21.3.1 in AL2023 |
+| CVE-2026-44432 | HIGH | Data amplification | 2.7.0 | Same — awaiting compatible pip/package release |
+
+#### python3-pip — RPM version 21.3.1-2.amzn2023.0.16
+
+| CVE | Severity | Description | Fix version | Status |
+| --- | --- | --- | --- | --- |
+| CVE-2026-6357 | HIGH | Arbitrary code execution | 21.3.1-2.amzn2023.0.19 | Fix identified; not yet available in the AL2023 dnf repository |
+
+#### AL2023 OS packages — fix versions identified but not yet in repo
+
+These packages have known fix versions in the ALAS advisory database but the
+patched packages are not yet available via `dnf` in the AL2023 repository used
+by this image's base layer. All are suppressed in `.trivyignore`.
+
+| CVE | Severity | Component | Fix version |
+| --- | --- | --- | --- |
+| CVE-2026-4046 | HIGH | `glibc` | 2.34-231.amzn2023.0.4 |
+| CVE-2026-35385 | HIGH | `openssh`, `openssh-clients` | 8.7p1-8.amzn2023.0.17 |
+| CVE-2026-3644 | HIGH | `python3`, `python3-libs` | 3.9.25-1.amzn2023.0.5 |
+| CVE-2026-4786 | HIGH | `python3`, `python3-libs` | 3.9.25-1.amzn2023.0.5 |
+| CVE-2026-6100 | HIGH | `python3`, `python3-libs` | 3.9.25-1.amzn2023.0.5 |
+
+#### supercronic — Go stdlib vulnerabilities (inherited from base image)
+
+`supercronic` is a statically-linked binary compiled with Go 1.26.2 and
+embedded in the `aws-backup-base` image. These CVEs require rebuilding
+supercronic with Go ≥1.26.3. They cannot be patched by changes to this
+Dockerfile. All are suppressed in `.trivyignore`.
+
+| CVE | Severity | Description |
+| --- | --- | --- |
+| CVE-2026-32280 — CVE-2026-33810 | HIGH | Go stdlib batch (previously documented) |
+| CVE-2026-33811 | HIGH | `LookupCNAME` cgo DNS resolver issue |
+| CVE-2026-33814 | HIGH | HTTP/2 SETTINGS frame processing DoS |
+| CVE-2026-39820 | HIGH | `ParseAddress`/`ParseAddressList` input handling |
+| CVE-2026-39836 | HIGH | `Dial`/`LookupPort` panic on NUL byte |
+| CVE-2026-42499 | HIGH | `consumePhrase` DoS via pathological input |
+| CVE-2026-42501 | HIGH | Go stdlib issue (Go ≥1.26.3 required) |
+
+Tracked: <https://github.com/aptible/supercronic/releases>
+
+#### perl — legacy CVEs (advisory scanners only)
+
+`perl` is pulled in as a transitive dnf dependency. These CVEs appear in Grype
+and Scout but Trivy does not flag them (no unfixed annotation in the AL2023 DB).
+A `dnf update perl` would install the patched version if it becomes available.
+
+| CVE | Severity | Fix version |
+| --- | --- | --- |
+| CVE-2023-31484 | HIGH | 5.32.1-477.amzn2023.0.4 |
+| CVE-2023-31486 | HIGH | 5.32.1-477.amzn2023.0.5 |
 
 ### Remediated vulnerabilities
 
 | CVE / Advisory | Component | Remediation |
 | --- | --- | --- |
 | Alpine APK CVEs (multiple) | `python3`, `busybox`, `openssh`, `unzip`, `py3-urllib3`, `py3-cryptography`, `py3-pip` | Resolved by migrating base image from Alpine 3.22 to AL2023 (v1.0.1) |
-| CVE-2026-32280 — CVE-2026-33810 | supercronic Go stdlib | Resolved: `aws-backup-base` now ships supercronic v0.2.45 (Go ≥1.26.2) |
-| GHSA-r6ph-v2qm-q3c2, CVE-2026-26007 | cryptography (pip) | Pinned `cryptography>=47.0.0` in `requirements.txt` |
-| GHSA-gm62-xv2j-4w53 + 3 others | urllib3 (pip) | Pinned `urllib3>=2.6.3` in `requirements.txt` |
-| GHSA-8rrh-rw8j-w5fx, CVE-2026-24049 | wheel (pip) | Pinned `wheel>=0.47.0` in `requirements.txt` |
-| GHSA-58pv-8j8x-9vj2 | jaraco.context (pip) | Pinned `jaraco-context>=6.1.2` in `requirements.txt` |
+| CVE-2026-32280 — CVE-2026-33810 | supercronic Go stdlib | Partially resolved: `aws-backup-base` ships supercronic v0.2.45 (Go ≥1.26.2); newer batch of Go stdlib CVEs (33811, 33814, 39820, 39836, 42499, 42501) added to `.trivyignore` pending Go ≥1.26.3 release |
+| GHSA-r6ph-v2qm-q3c2, CVE-2026-26007 | cryptography (pip) | Pinned `cryptography>=46.0.5` in Dockerfile |
+| GHSA-gm62-xv2j-4w53 + 3 others | urllib3 (pip) | Pinned `urllib3>=2.6.3` in Dockerfile |
+| GHSA-8rrh-rw8j-w5fx, CVE-2026-24049 | wheel (pip) | Pinned `wheel>=0.46.2` in Dockerfile |
+| GHSA-58pv-8j8x-9vj2 | jaraco.context (pip) | Pinned `jaraco.context>=6.1.0` in Dockerfile |
 | GHSA-4xh5-x5gv-qwph, CVE-2025-8869 | pip | Upgraded to pip≥25.3 (via `aws-backup-base`) |
-| GHSA-jfmj-5v4g-7637, CVE-2024-5569 | zipp (pip) | Pinned `zipp>=3.23.1` in `requirements.txt` |
+| GHSA-jfmj-5v4g-7637, CVE-2024-5569 | zipp (pip) | Pinned `zipp>=3.19.1` in Dockerfile |
+| CVE-2022-40897, CVE-2024-6345, CVE-2025-47273 | setuptools | Installed `setuptools>=78.1.1` via pip `--ignore-installed` to override RPM 59.6.0 |
 
 ### Test suite status
 
-All 103 unit tests pass after the Dockerfile changes above.  The staging
-integration test (`test/staging`) requires a live Mokerlink switch and live AWS
-credentials; it is intentionally skipped in automated CI and must be run
-manually in a network-connected environment.
+All unit tests pass. The staging integration test (`test/staging`) requires a
+live Mokerlink switch and live AWS credentials; it is intentionally skipped in
+automated CI and must be run manually in a network-connected environment.
 
 ## Reporting vulnerabilities
 
