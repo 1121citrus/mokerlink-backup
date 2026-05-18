@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+
+# Push a config file to a Mokerlink switch via SSH + TFTP.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   set-config-ssh HOSTNAME TFTP_HOST CONFIG_BASENAME
+#
+# DESCRIPTION
+#   Opens an SSH session to HOSTNAME, logs in, and issues:
+#     copy tftp://TFTP_HOST/CONFIG_BASENAME startup-config
+#   then optionally reboots.  Designed for use with a TFTP server started
+#   by tftp-serve running in parallel on the bootstrap host.
+#
+#   Requires SSH to be enabled on the switch (not the factory default).
+#   For factory-reset switches use set-config-serial instead.
+#
+#   SSH flags mirror get-config exactly:
+#     -F /dev/null          ignore ~/.ssh/config
+#     StrictHostKeyChecking=no + UserKnownHostsFile=/dev/null
+#                           firmware regenerates its host key on every reset
+#     +ssh-rsa              firmware only supports legacy RSA key exchange
+#
+#   All session parameters are passed via environment variables so
+#   credentials are never visible in the process list (ps(1)).
+#
+# POSITIONAL ARGUMENTS
+#   HOSTNAME         Switch hostname or IP address
+#   TFTP_HOST        IP address of the TFTP server (bootstrap host)
+#   CONFIG_BASENAME  Filename the switch will request from the TFTP server
+#
+# ENVIRONMENT
+#   EXPECT_USERNAME  Login username (default: admin)
+#   EXPECT_PASSWORD  Login password (required)
+#   EXPECT_REBOOT    'y' to reboot after restore, 'n' to skip (default: y)
+#   EXPECT_TIMEOUT   Seconds to wait for each prompt (default: 30)
+#   DEBUG            Set to 'true' to enable expect -d tracing
+
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1091
+source /usr/local/include/bash/common-functions
+
+set -o errexit -o errtrace -o nounset -o pipefail
+is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+
+hostname="${1:?need switch hostname or IP}"
+tftp_host="${2:?need TFTP host IP}"
+config_basename="${3:?need config filename}"
+
+expect_args=()
+is_true "${DEBUG}" && expect_args+=(-d)
+
+EXPECT_HOSTNAME="${hostname}" \
+EXPECT_TFTP_HOST="${tftp_host}" \
+EXPECT_CONFIG_BASENAME="${config_basename}" \
+EXPECT_USERNAME="${EXPECT_USERNAME:-admin}" \
+EXPECT_PASSWORD="${EXPECT_PASSWORD:?need EXPECT_PASSWORD}" \
+EXPECT_REBOOT="${EXPECT_REBOOT:-y}" \
+EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
+/usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
+    log_user 1
+    set match_max 1000000
+    set timeout   $env(EXPECT_TIMEOUT)
+    set hostname  $env(EXPECT_HOSTNAME)
+    set tftp      $env(EXPECT_TFTP_HOST)
+    set cfgfile   $env(EXPECT_CONFIG_BASENAME)
+    set username  $env(EXPECT_USERNAME)
+    set password  $env(EXPECT_PASSWORD)
+    set do_reboot $env(EXPECT_REBOOT)
+
+    # -F /dev/null: ignore ~/.ssh/config to prevent local settings from
+    #   interfering.
+    # StrictHostKeyChecking=no + UserKnownHostsFile=/dev/null: the Mokerlink
+    #   firmware regenerates its host key on every factory reset; a known-
+    #   hosts file would block automation after any reset.
+    # +ssh-rsa: modern OpenSSH disables ssh-rsa by default; the Mokerlink
+    #   firmware does not support the newer key exchange algorithms.
+    spawn ssh -F /dev/null -T -o LogLevel=quiet \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o HostKeyAlgorithms=+ssh-rsa \
+        -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+        -l $username $hostname
+
+    # The firmware presents an application-layer login prompt over the SSH
+    # channel and does not support public-key authentication.
+    expect "Username: "
+    send -- "$username\r"
+    expect "Password: "
+    send -- "$password\r"
+
+    # Wait for privileged exec prompt (#).
+    expect "# "
+
+    # Disable the output pager so responses are not interrupted.
+    send -- "terminal length 0\r"
+    expect "# "
+
+    # Issue the TFTP config restore command.
+    send -- "copy tftp://$tftp/$cfgfile startup-config\r"
+
+    expect {
+        "Do you want to reboot now?" { }
+        "Error"  {
+            puts stderr "ERROR: TFTP restore failed"
+            exit 1
+        }
+        timeout  {
+            puts stderr "ERROR: timed out waiting for TFTP restore"
+            exit 1
+        }
+    }
+
+    send -- "$do_reboot\r"
+
+    if { $do_reboot eq "y" } {
+        catch { expect eof }
+    } else {
+        expect "# "
+        catch {send -- "exit\r"}
+        expect {
+            "> " { catch {send -- "exit\r"} }
+            eof  {}
+            timeout {}
+        }
+        catch {expect eof}
+    }
+__END_OF_SCRIPT__
