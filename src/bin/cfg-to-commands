@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+
+# Translate a Mokerlink .cfg config file to interactive CLI commands.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   cfg-to-commands [FILE]
+#
+# DESCRIPTION
+#   Reads a Mokerlink switch config file (the "SYSTEM CONFIG FILE ::= BEGIN"
+#   format produced by 'show startup-config' or the web UI backup) from FILE
+#   or stdin and writes the equivalent interactive CLI command sequence to
+#   stdout.
+#
+#   The .cfg format uses an indented block structure:
+#
+#     global-command arg
+#     block-keyword arg
+#      sub-command arg      <- one leading space = sub-mode
+#     !                     <- block terminator
+#
+#   This is translated to interactive mode as:
+#
+#     configure terminal
+#     global-command arg
+#     block-keyword arg     <- enters sub-mode
+#     sub-command arg
+#     exit                  <- leaves sub-mode after !
+#     ...
+#     end                   <- leaves configure terminal
+#     save
+#
+#   Lines stripped before processing:
+#     - The "SYSTEM CONFIG FILE ::= BEGIN" header (first line)
+#     - Comment lines starting with '!' that are NOT block terminators
+#       (a bare '!' with no trailing text is a block terminator)
+#     - Blank lines
+#     - Lines whose only content is whitespace
+#
+#   CRLF line endings are normalised to LF.
+#
+# OPTIONS
+#   --help     Display this help text
+#
+# ENVIRONMENT
+#   DEBUG      Enable debug tracing (default: false)
+
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1091
+source /usr/local/include/bash/common-functions
+
+set -o errexit -o errtrace -o nounset -o pipefail
+is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+
+if [[ "${1:-}" == "--help" ]]; then
+    cat <<'EOF'
+Usage: cfg-to-commands [FILE]
+
+Translate a Mokerlink .cfg config file to interactive CLI commands.
+Reads from FILE or stdin; writes commands to stdout.
+
+The output sequence is suitable for feeding line-by-line to an interactive
+CLI session (e.g. via set-config-cmd over SSH).
+EOF
+    exit 0
+fi
+
+input="${1:-/dev/stdin}"
+
+awk '
+# Strip CRLF -> LF (busybox-safe: no gsub alternation).
+{ gsub(/\r$/, "") }
+
+# Skip the file header.
+/^SYSTEM CONFIG FILE ::= BEGIN/ { next }
+
+# Bare "!" is a block terminator; emit "exit" to leave the current sub-mode.
+# A "!" followed by any non-whitespace text is a comment line — skip it.
+/^!$/ {
+    if (in_block) {
+        print "exit"
+        in_block = 0
+    }
+    next
+}
+
+# Skip comment lines (! followed by text) and blank lines.
+/^![^ ]/ { next }
+/^!/ && length($0) > 1 { next }
+/^[[:space:]]*$/ { next }
+
+# Indented line (one leading space) = sub-mode command inside a block.
+/^ / {
+    sub(/^ /, "")
+    print
+    next
+}
+
+# Top-level line: if we were in a block, the absence of a bare "!" means the
+# block has no explicit terminator — emit "exit" defensively before continuing.
+{
+    if (in_block) {
+        print "exit"
+        in_block = 0
+    }
+    # Detect block-opening keywords: these enter a named sub-mode and
+    # have indented sub-commands.  Flat top-level commands (ip, username,
+    # system, voice-vlan, clock, sntp) are NOT listed here.
+    if ($1 == "vlan"         ||
+        $1 == "interface"    ||
+        $1 == "spanning-tree" ||
+        $1 == "router") {
+        in_block = 1
+    }
+    print
+}
+
+BEGIN {
+    in_block = 0
+    # Emit the configure terminal preamble.
+    print "configure terminal"
+}
+
+END {
+    if (in_block) { print "exit" }
+    print "end"
+    print "save"
+}
+' "${input}"
