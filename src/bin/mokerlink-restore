@@ -307,28 +307,35 @@ case "${transport}" in
     serial)
         # Determine the bootstrap host IP on the directly-connected interface.
         # The switch is at 192.168.2.1; the host must be in 192.168.2.x/24.
-        # Use the first local address in that subnet, falling back to the
-        # primary outbound address if none is found.
-        tftp_host=$(ip -4 addr show 2>/dev/null \
-            | grep -oP '(?<=inet )192\.168\.2\.\d+' \
-            | grep -v '^192\.168\.2\.1$' \
-            | head -1 || true)
-        if [[ -z "${tftp_host}" ]]; then
-            # macOS fallback: scutil or route
-            tftp_host=$(route -n get default 2>/dev/null \
-                | awk '/interface:/{print $2}' \
-                | xargs -I{} ipconfig getifaddr {} 2>/dev/null \
-                || true)
+        # TFTP_HOST env var overrides auto-detection (useful in tests).
+        if [[ -n "${TFTP_HOST:-}" ]]; then
+            tftp_host="${TFTP_HOST}"
+        else
+            tftp_host=$(ip -4 addr show 2>/dev/null \
+                | grep -oP '(?<=inet )192\.168\.2\.\d+' \
+                | grep -v '^192\.168\.2\.1$' \
+                | head -1 || true)
+            if [[ -z "${tftp_host}" ]]; then
+                # macOS fallback via route + ipconfig.
+                tftp_host=$(route -n get default 2>/dev/null \
+                    | awk '/interface:/{print $2}' \
+                    | xargs -I{} ipconfig getifaddr {} 2>/dev/null \
+                    || true)
+            fi
+            [[ -n "${tftp_host}" ]] || \
+                error "cannot determine local IP for TFTP; \
+set TFTP_HOST env var or ensure a 192.168.2.x address is configured"
         fi
-        [[ -n "${tftp_host}" ]] || \
-            error "cannot determine local IP for TFTP; set TFTP_HOST"
 
         start_tftp "${tftp_host}"
+
+        # Convert do_reboot (true/false) to y/n for the expect script.
+        is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
 
         info "starting serial restore on ${serial_port}"
         EXPECT_USERNAME="${user}" \
         EXPECT_PASSWORD="${password}" \
-        EXPECT_REBOOT="${do_reboot}" \
+        EXPECT_REBOOT="${_reboot_flag}" \
             bash "${bindir}/set-config-serial" \
                 "${serial_port}" \
                 "${tftp_host}" \
