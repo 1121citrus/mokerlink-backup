@@ -1,0 +1,295 @@
+#!/usr/bin/env bash
+
+# Push a configuration file to a Mokerlink managed network switch.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   mokerlink-restore --transport TRANSPORT --config FILE [options]
+#
+# DESCRIPTION
+#   Pushes a configuration file to a Mokerlink switch using the selected
+#   transport mechanism, then optionally reboots the switch and waits for
+#   it to come back up.
+#
+# OPTIONS
+#   -?,--help              Display this help text
+#   -v,--version           Display command version
+#   -t,--transport TRANS   Transport: serial, http, ssh, ssh-cmd (required)
+#   -c,--config FILE       Config file to push (required)
+#   -H,--host HOST         Switch IP or hostname
+#                          (env: MOKERLINK_HOST; default: 192.168.2.1)
+#      --port PORT         Serial device path (serial transport only;
+#                          default: auto-detect /dev/cu.usbserial-* or
+#                          /dev/ttyUSB0)
+#   -u,--user USER         Login username (default: admin)
+#   -p,--password PW       Password (env: MOKERLINK_PASSWORD;
+#                          serial default: 'admin')
+#   -P,--password-file FILE
+#                          Password file (env: MOKERLINK_PASSWORD_FILE;
+#                          default: /run/secrets/mokerlink-password)
+#      --no-reboot         Push config but do not reboot the switch
+#      --wait              Wait for switch to respond after reboot
+#                          (default: on for serial and http transports)
+#      --no-wait           Return immediately after triggering reboot
+#
+# ENVIRONMENT
+#   MOKERLINK_HOST         Switch hostname or IP (default: 192.168.2.1)
+#   MOKERLINK_PASSWORD     Switch login password
+#   MOKERLINK_PASSWORD_FILE
+#                          Path to password file
+#                          (default: /run/secrets/mokerlink-password)
+#   DEBUG                  Enable debug tracing (default: false)
+#   ENV                    Env-file path (default: ~/.env)
+#
+# EXAMPLES
+#   # Bootstrap a factory-reset switch over the serial console:
+#   sudo mokerlink-restore --transport serial --config start-config.cfg
+#
+#   # Push a config update over HTTP (Ethernet cable only, no serial):
+#   mokerlink-restore --transport http --config start-config.cfg
+#
+#   # Update a running SSH-enabled switch without a TFTP server:
+#   mokerlink-restore --transport ssh-cmd --config start-config.cfg \
+#       --host switch-1 \
+#       --password-file /run/secrets/mokerlink-password
+
+command=$(basename "${0}")
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1091
+source /usr/local/include/bash/common-functions
+
+ENV=${ENV:-${HOME:-/root}/.env}
+set -o errexit -o errtrace -o nounset -o pipefail
+# shellcheck disable=SC1090
+[[ -r "${ENV}" ]] && source "${ENV}"
+is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+
+# Print usage to stdout.
+# Args: None
+# Returns: 0
+show_help() {
+    cat <<'EOF'
+Usage: mokerlink-restore --transport TRANSPORT --config FILE [options]
+
+Push a configuration file to a Mokerlink switch and reboot it.
+
+Options:
+  -?,--help              Display this help text
+  -v,--version           Display command version
+  -t,--transport TRANS   Transport: serial, http, ssh, ssh-cmd (required)
+  -c,--config FILE       Configuration file to push (required)
+  -H,--host HOST         Switch IP or hostname (default: 192.168.2.1)
+     --port PORT         Serial device path (serial transport only;
+                         default: auto-detect)
+  -u,--user USER         Login username (default: admin)
+  -p,--password PW       Password (env: MOKERLINK_PASSWORD)
+  -P,--password-file FILE
+                         Password file (env: MOKERLINK_PASSWORD_FILE;
+                         default: /run/secrets/mokerlink-password)
+     --no-reboot         Push config but do not reboot the switch
+     --wait              Wait for switch to respond after reboot
+     --no-wait           Return immediately after triggering reboot
+
+Transports:
+  serial    Serial console (115200/8N1) + TFTP file transfer.
+            Requires a USB-to-serial adapter and sudo (TFTP port 69).
+            Works on factory-reset switches where SSH is disabled.
+  http      Web UI config upload over HTTP.
+            Requires only an Ethernet cable; no serial adapter needed.
+  ssh       SSH session + TFTP file transfer.
+            Requires SSH to be enabled (not the factory default).
+  ssh-cmd   SSH session with per-command config replay; no TFTP needed.
+            Requires SSH to be enabled (not the factory default).
+
+Examples:
+  # Bootstrap a factory-reset switch over serial:
+  sudo mokerlink-restore --transport serial --config start-config.cfg
+
+  # Update a running switch over HTTP:
+  mokerlink-restore --transport http --config start-config.cfg
+
+  # Update a running switch over SSH without a TFTP server:
+  mokerlink-restore --transport ssh-cmd --config start-config.cfg \
+      --host switch-1 --password-file /run/secrets/mokerlink-password
+EOF
+}
+
+# Print the installed version to stdout.
+# Args: None
+# Returns: 0
+show_version() {
+    cat /usr/local/share/mokerlink-backup/version 2>/dev/null \
+        || echo "unknown"
+}
+
+# ── Defaults ──────────────────────────────────────────────────────────────────
+
+transport=
+config_file=
+host="${MOKERLINK_HOST:-192.168.2.1}"
+serial_port=
+user="admin"
+password="${MOKERLINK_PASSWORD:-}"
+password_file="${MOKERLINK_PASSWORD_FILE:-/run/secrets/mokerlink-password}"
+do_reboot=true
+# wait_for_restart: empty = use transport default; true/false = explicit.
+wait_for_restart=
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -\?|--help)
+            show_help
+            exit 0
+            ;;
+        -v|--version)
+            show_version
+            exit 0
+            ;;
+        -t|--transport)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            transport="$2"
+            shift
+            ;;
+        -c|--config)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            config_file="$2"
+            shift
+            ;;
+        -H|--host)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            host="$2"
+            shift
+            ;;
+        --port)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            serial_port="$2"
+            shift
+            ;;
+        -u|--user)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            user="$2"
+            shift
+            ;;
+        -p|--password)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            password="$2"
+            shift
+            ;;
+        -P|--password-file)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            password_file="$2"
+            shift
+            ;;
+        --no-reboot)
+            do_reboot=false
+            ;;
+        --wait)
+            wait_for_restart=true
+            ;;
+        --no-wait)
+            wait_for_restart=false
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            error "unknown option: '${1}'"
+            ;;
+        *)
+            error "unexpected argument: '${1}'"
+            ;;
+    esac
+    shift
+done
+
+# ── Validation ────────────────────────────────────────────────────────────────
+
+[[ -n "${transport}" ]] || \
+    error "transport is required (--transport serial|http|ssh|ssh-cmd)"
+
+case "${transport}" in
+    serial|http|ssh|ssh-cmd) ;;
+    *) error "unknown transport: '${transport}' \
+(expected: serial, http, ssh, or ssh-cmd)" ;;
+esac
+
+[[ -n "${config_file}" ]] || \
+    error "config file is required (--config FILE)"
+[[ -f "${config_file}" ]] || \
+    error "config file not found: '${config_file}'"
+[[ -n "${host}" ]] || \
+    error "host is required (--host HOST or MOKERLINK_HOST)"
+
+# SSH transports require an explicit password; serial defaults to 'admin'.
+if [[ "${transport}" == "ssh" || "${transport}" == "ssh-cmd" ]]; then
+    if [[ -z "${password}" ]] && [[ -r "${password_file}" ]]; then
+        password=$(cat "${password_file}")
+    fi
+    [[ -n "${password}" ]] || \
+        error 'need MOKERLINK_PASSWORD, --password, or --password-file \
+(default: /run/secrets/mokerlink-password)'
+fi
+
+# Serial transport: auto-detect port when --port not given.
+if [[ "${transport}" == "serial" && -z "${serial_port}" ]]; then
+    for _candidate in \
+            /dev/cu.usbserial-* \
+            /dev/ttyUSB0 \
+            /dev/ttyACM0; do
+        if [[ -c "${_candidate}" ]]; then
+            serial_port="${_candidate}"
+            info "auto-detected serial port: ${serial_port}"
+            break
+        fi
+    done
+    [[ -n "${serial_port}" ]] || \
+        error "no serial port found; specify with --port \
+(tried /dev/cu.usbserial-*, /dev/ttyUSB0, /dev/ttyACM0)"
+fi
+
+# Serial bootstrap: fall back to factory default password when none supplied.
+if [[ "${transport}" == "serial" && -z "${password}" ]]; then
+    if [[ -r "${password_file}" ]]; then
+        password=$(cat "${password_file}")
+    else
+        password="admin"
+        info "no password provided; using factory default 'admin'"
+    fi
+fi
+
+# Apply transport-specific default for wait_for_restart.
+if [[ -z "${wait_for_restart}" ]]; then
+    case "${transport}" in
+        serial|http) wait_for_restart=true ;;
+        ssh|ssh-cmd) wait_for_restart=false ;;
+    esac
+fi
+
+# ── Dispatch ──────────────────────────────────────────────────────────────────
+
+info "begin ${command}"
+info "transport=${transport} host=${host} config=${config_file}"
+
+case "${transport}" in
+    serial)
+        error "serial transport not yet implemented"
+        ;;
+    http)
+        error "http transport not yet implemented"
+        ;;
+    ssh)
+        error "ssh transport not yet implemented"
+        ;;
+    ssh-cmd)
+        error "ssh-cmd transport not yet implemented"
+        ;;
+esac
+
+info "finish ${command}"
