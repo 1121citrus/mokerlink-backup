@@ -377,7 +377,22 @@ set TFTP_HOST env var"
                 "${config_basename}"
         ;;
     ssh-cmd)
-        error "ssh-cmd transport not yet implemented"
+        # Parse the config file into an interactive CLI command stream,
+        # write it to a temp file, then drive set-config-cmd over SSH.
+        commands_file=$(mktemp)
+        trap 'rm -f "${commands_file}"' EXIT
+        bash "${bindir}/cfg-to-commands" "${config_file}" \
+            > "${commands_file}"
+
+        is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
+
+        info "starting SSH command-stream restore to ${host}"
+        EXPECT_USERNAME="${user}" \
+        EXPECT_PASSWORD="${password}" \
+        EXPECT_REBOOT="${_reboot_flag}" \
+            bash "${bindir}/set-config-cmd" \
+                "${host}" \
+                "${commands_file}"
         ;;
 esac
 

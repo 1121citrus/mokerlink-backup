@@ -99,7 +99,8 @@ The `ssh` and `ssh-cmd` transports require SSH to be enabled on the switch.
 SSH is **not** enabled on factory-reset units; use `serial` or `http` for
 first boot.
 
-**`ssh` transport** (requires a TFTP server; `sudo` needed for port 69):
+**`ssh` transport** — uses TFTP to transfer the config file; requires `sudo`
+for TFTP port 69:
 
 ```console
 $ sudo mokerlink-restore \
@@ -109,7 +110,8 @@ $ sudo mokerlink-restore \
     --password-file /run/secrets/mokerlink-password
 ```
 
-**`ssh-cmd` transport** (no TFTP server; no `sudo` needed):
+**`ssh-cmd` transport** — parses the config file and replays commands
+interactively; no TFTP server and no `sudo` needed:
 
 ```console
 $ mokerlink-restore \
@@ -118,6 +120,11 @@ $ mokerlink-restore \
     --host switch-1 \
     --password-file /run/secrets/mokerlink-password
 ```
+
+Both SSH transports use legacy RSA key exchange flags (`+ssh-rsa`) because
+the Mokerlink firmware does not support modern key exchange algorithms.  The
+switch host key is accepted unconditionally because the firmware regenerates
+it on every factory reset.
 
 ## Synopsis
 
