@@ -277,9 +277,62 @@ fi
 info "begin ${command}"
 info "transport=${transport} host=${host} config=${config_file}"
 
+config_basename=$(basename "${config_file}")
+tftp_pid=
+
+# Stop the TFTP server (if started) on any exit.
+cleanup() {
+    if [[ -n "${tftp_pid:-}" ]]; then
+        # tftp-serve manages its own cleanup; sending SIGTERM is enough.
+        kill "${tftp_pid}" 2>/dev/null || true
+        wait "${tftp_pid}" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+# Start a TFTP server in the background (serial and ssh transports).
+# Prints the PID to tftp_pid so cleanup() can stop it on exit.
+start_tftp() {
+    local tftp_host="${1:?need TFTP host}"
+    info "starting TFTP server to serve ${config_basename}"
+    bash "${bindir}/tftp-serve" \
+        --file "${config_file}" \
+        --address "${tftp_host}" &
+    tftp_pid=$!
+    # Give the server a moment to open the port before the switch connects.
+    sleep 2
+}
+
 case "${transport}" in
     serial)
-        error "serial transport not yet implemented"
+        # Determine the bootstrap host IP on the directly-connected interface.
+        # The switch is at 192.168.2.1; the host must be in 192.168.2.x/24.
+        # Use the first local address in that subnet, falling back to the
+        # primary outbound address if none is found.
+        tftp_host=$(ip -4 addr show 2>/dev/null \
+            | grep -oP '(?<=inet )192\.168\.2\.\d+' \
+            | grep -v '^192\.168\.2\.1$' \
+            | head -1 || true)
+        if [[ -z "${tftp_host}" ]]; then
+            # macOS fallback: scutil or route
+            tftp_host=$(route -n get default 2>/dev/null \
+                | awk '/interface:/{print $2}' \
+                | xargs -I{} ipconfig getifaddr {} 2>/dev/null \
+                || true)
+        fi
+        [[ -n "${tftp_host}" ]] || \
+            error "cannot determine local IP for TFTP; set TFTP_HOST"
+
+        start_tftp "${tftp_host}"
+
+        info "starting serial restore on ${serial_port}"
+        EXPECT_USERNAME="${user}" \
+        EXPECT_PASSWORD="${password}" \
+        EXPECT_REBOOT="${do_reboot}" \
+            bash "${bindir}/set-config-serial" \
+                "${serial_port}" \
+                "${tftp_host}" \
+                "${config_basename}"
         ;;
     http)
         error "http transport not yet implemented"
@@ -291,5 +344,12 @@ case "${transport}" in
         error "ssh-cmd transport not yet implemented"
         ;;
 esac
+
+if is_true "${do_reboot}" && is_true "${wait_for_restart}"; then
+    info "waiting for ${host} to come back up"
+    bash "${bindir}/wait-for-restart" \
+        --host "${host}" \
+        --port 80
+fi
 
 info "finish ${command}"
