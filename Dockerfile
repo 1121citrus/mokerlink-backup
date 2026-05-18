@@ -61,6 +61,7 @@ RUN set -eux; \
     && pip3 install --no-cache-dir --upgrade \
         'cryptography>=46.0.5' \
         'jaraco.context>=6.1.0' \
+        'tftpy>=0.8.0' \
         'urllib3>=2.6.3' \
         'wheel>=0.46.2' \
         'zipp>=3.19.1' \

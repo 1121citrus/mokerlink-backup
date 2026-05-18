@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+
+# Start a one-shot TFTP server, serve one named file, then stop.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   tftp-serve --file FILE [--address ADDR] [--timeout SECS]
+#
+# DESCRIPTION
+#   Starts a TFTP server that serves FILE from a temporary root directory,
+#   waits for TIMEOUT seconds, then stops cleanly.  Designed to run in the
+#   background while a switch performs a 'copy tftp://ADDR/BASENAME startup-
+#   config' command.
+#
+#   Backend selection (first available wins):
+#     1. macOS built-in tftpd via launchctl (requires sudo; uses /private/tftpboot)
+#     2. Python 3 tftpy module (python3 -m tftpy.TftpServer)
+#
+#   TFTP uses port 69 (UDP), which requires root on most systems.  On macOS
+#   run this script with sudo.  On Linux either run with sudo or use a TFTP
+#   server that supports privilege dropping.
+#
+# OPTIONS
+#   --file FILE        File to serve (required); the TFTP client requests
+#                      the basename of this path
+#   --address ADDR     IP address to bind (default: 0.0.0.0)
+#   --timeout SECS     Seconds to keep the server running (default: 120)
+#   --help             Display this help text
+#
+# ENVIRONMENT
+#   DEBUG              Enable debug tracing (default: false)
+
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1091
+source /usr/local/include/bash/common-functions
+
+set -o errexit -o errtrace -o nounset -o pipefail
+is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+
+show_help() {
+    cat <<'EOF'
+Usage: tftp-serve --file FILE [--address ADDR] [--timeout SECS]
+
+Start a one-shot TFTP server to serve a single file to a switch.
+
+Options:
+  --file FILE        File to serve via TFTP (required)
+  --address ADDR     Bind address (default: 0.0.0.0)
+  --timeout SECS     Seconds to keep server running (default: 120)
+  --help             Display this help text
+
+The TFTP server listens on port 69 (UDP), which requires root.
+On macOS: run with sudo.
+On Linux: run with sudo or use a root-owned wrapper.
+
+The switch retrieves the file with:
+  copy tftp://THIS_HOST/BASENAME startup-config
+EOF
+}
+
+# ── Defaults ──────────────────────────────────────────────────────────────────
+
+serve_file=
+bind_address="0.0.0.0"
+timeout_secs=120
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --file)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            serve_file="$2"
+            shift
+            ;;
+        --address)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            bind_address="$2"
+            shift
+            ;;
+        --timeout)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            timeout_secs="$2"
+            shift
+            ;;
+        --help)
+            show_help
+            exit 0
+            ;;
+        -*)
+            error "unknown option: '${1}'"
+            ;;
+        *)
+            error "unexpected argument: '${1}'"
+            ;;
+    esac
+    shift
+done
+
+[[ -n "${serve_file}" ]] || error "--file is required"
+[[ -f "${serve_file}" ]] || error "file not found: '${serve_file}'"
+
+# ── Backend selection ─────────────────────────────────────────────────────────
+
+tftp_pid=
+tmproot=
+
+cleanup() {
+    if [[ -n "${tftp_pid:-}" ]]; then
+        kill "${tftp_pid}" 2>/dev/null || true
+        wait "${tftp_pid}" 2>/dev/null || true
+    fi
+    # macOS: unload the launchd plist if we loaded it.
+    if [[ "${_backend:-}" == "macos" ]]; then
+        launchctl unload -F \
+            /System/Library/LaunchDaemons/tftp.plist 2>/dev/null || true
+        info "macOS tftpd unloaded"
+    fi
+    [[ -n "${tmproot:-}" ]] && rm -rf "${tmproot}"
+}
+trap cleanup EXIT
+
+basename=$(basename "${serve_file}")
+
+# Detect and start the appropriate backend.
+if [[ "$(uname -s)" == "Darwin" ]] && \
+        [[ -f /System/Library/LaunchDaemons/tftp.plist ]]; then
+    # macOS built-in tftpd serves from /private/tftpboot.
+    _backend="macos"
+    tmproot="/private/tftpboot"
+    install -d -m 1777 "${tmproot}"
+    install -m 644 "${serve_file}" "${tmproot}/${basename}"
+    launchctl load -F /System/Library/LaunchDaemons/tftp.plist
+    info "macOS tftpd started; serving ${basename} from ${tmproot}"
+elif python3 -c "import tftpy" 2>/dev/null; then
+    # Python tftpy: run in background via a small inline script.
+    _backend="tftpy"
+    tmproot=$(mktemp -d)
+    install -m 644 "${serve_file}" "${tmproot}/${basename}"
+    python3 - "${tmproot}" "${bind_address}" <<'__TFTPY__' &
+import sys, tftpy, signal
+root, addr = sys.argv[1], sys.argv[2]
+srv = tftpy.TftpServer(root)
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+srv.listen(addr, 69)
+__TFTPY__
+    tftp_pid=$!
+    info "tftpy server started (pid ${tftp_pid}); serving ${basename}"
+else
+    error "no TFTP backend available; install python3 tftpy \
+(pip3 install tftpy) or run on macOS where tftpd is built in"
+fi
+
+info "TFTP ready: ${basename} available for ${timeout_secs}s"
+sleep "${timeout_secs}"
+info "TFTP timeout reached; stopping server"
