@@ -345,7 +345,36 @@ set TFTP_HOST env var or ensure a 192.168.2.x address is configured"
         error "http transport not yet implemented"
         ;;
     ssh)
-        error "ssh transport not yet implemented"
+        if [[ -n "${TFTP_HOST:-}" ]]; then
+            tftp_host="${TFTP_HOST}"
+        else
+            tftp_host=$(ip -4 addr show 2>/dev/null \
+                | grep -oP '(?<=inet )\d+\.\d+\.\d+\.\d+' \
+                | grep -v "^${host}$" \
+                | head -1 || true)
+            if [[ -z "${tftp_host}" ]]; then
+                tftp_host=$(route -n get default 2>/dev/null \
+                    | awk '/interface:/{print $2}' \
+                    | xargs -I{} ipconfig getifaddr {} 2>/dev/null \
+                    || true)
+            fi
+            [[ -n "${tftp_host}" ]] || \
+                error "cannot determine local IP for TFTP; \
+set TFTP_HOST env var"
+        fi
+
+        start_tftp "${tftp_host}"
+
+        is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
+
+        info "starting SSH+TFTP restore to ${host}"
+        EXPECT_USERNAME="${user}" \
+        EXPECT_PASSWORD="${password}" \
+        EXPECT_REBOOT="${_reboot_flag}" \
+            bash "${bindir}/set-config-ssh" \
+                "${host}" \
+                "${tftp_host}" \
+                "${config_basename}"
         ;;
     ssh-cmd)
         error "ssh-cmd transport not yet implemented"
