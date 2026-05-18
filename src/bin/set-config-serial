@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+
+# Push a config file to a Mokerlink switch via serial console + TFTP.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   set-config-serial PORT TFTP_HOST CONFIG_BASENAME
+#
+# DESCRIPTION
+#   Opens a serial console session (115200/8N1/no-flow) to the Mokerlink
+#   switch on PORT, logs in, and issues:
+#     copy tftp://TFTP_HOST/CONFIG_BASENAME startup-config
+#   then optionally reboots.  Designed for use with a TFTP server started
+#   by tftp-serve running in parallel on the bootstrap host.
+#
+#   All session parameters are passed via environment variables so that
+#   credentials are never visible in the process list (ps(1)).
+#
+# POSITIONAL ARGUMENTS
+#   PORT             Serial device path (e.g. /dev/cu.usbserial-0001)
+#   TFTP_HOST        IP address of the TFTP server (bootstrap host)
+#   CONFIG_BASENAME  Filename the switch will request from the TFTP server
+#
+# ENVIRONMENT
+#   EXPECT_USERNAME  Login username (default: admin)
+#   EXPECT_PASSWORD  Login password (default: admin)
+#   EXPECT_REBOOT    'y' to reboot after restore, 'n' to skip (default: y)
+#   EXPECT_TIMEOUT   Seconds to wait for each prompt (default: 30)
+#   DEBUG            Set to 'true' to enable expect -d tracing
+
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1091
+source /usr/local/include/bash/common-functions
+
+set -o errexit -o errtrace -o nounset -o pipefail
+is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+
+port="${1:?need serial port (e.g. /dev/cu.usbserial-0001)}"
+tftp_host="${2:?need TFTP host IP}"
+config_basename="${3:?need config filename}"
+
+expect_args=()
+is_true "${DEBUG}" && expect_args+=(-d)
+
+# Parameters are exported as EXPECT_* variables and read inside the Tcl
+# script via $env(...).  The heredoc delimiter is single-quoted so bash
+# does not expand the Tcl $env() references before expect reads them.
+EXPECT_PORT="${port}" \
+EXPECT_TFTP_HOST="${tftp_host}" \
+EXPECT_CONFIG_BASENAME="${config_basename}" \
+EXPECT_USERNAME="${EXPECT_USERNAME:-admin}" \
+EXPECT_PASSWORD="${EXPECT_PASSWORD:-admin}" \
+EXPECT_REBOOT="${EXPECT_REBOOT:-y}" \
+EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
+/usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
+    log_user 1
+    set match_max 1000000
+    set timeout  $env(EXPECT_TIMEOUT)
+    set port     $env(EXPECT_PORT)
+    set tftp     $env(EXPECT_TFTP_HOST)
+    set cfgfile  $env(EXPECT_CONFIG_BASENAME)
+    set username $env(EXPECT_USERNAME)
+    set password $env(EXPECT_PASSWORD)
+    set do_reboot $env(EXPECT_REBOOT)
+
+    # Open the serial port at 115200/8N1, no flow control.
+    spawn -open [open $port r+]
+    fconfigure $spawn_id -mode 115200,n,8,1 -handshake none \
+        -translation binary -buffering full
+
+    # Send a carriage return to wake the console and wait for the login
+    # prompt.  The switch may be at any state (idle prompt or login screen);
+    # the two-level expect handles both.
+    send -- "\r"
+    expect {
+        "Username: " { }
+        "# "         {
+            # Already logged in from a previous session; log out first.
+            send -- "exit\r"
+            expect "Username: "
+        }
+        timeout {
+            # No prompt — try one more CR before giving up.
+            send -- "\r"
+            expect "Username: "
+        }
+    }
+
+    send -- "$username\r"
+    expect "Password: "
+    send -- "$password\r"
+
+    # Wait for the privileged exec prompt (#).  The switch may show a
+    # user-exec prompt (>) first; send 'enable' if needed.
+    expect {
+        "# " { }
+        "> " {
+            send -- "enable\r"
+            expect "# "
+        }
+    }
+
+    # Disable the output pager so long responses are not interrupted.
+    send -- "terminal length 0\r"
+    expect "# "
+
+    # Issue the TFTP config restore command.
+    send -- "copy tftp://$tftp/$cfgfile startup-config\r"
+
+    # The firmware prints progress then asks whether to reboot.
+    expect {
+        "Do you want to reboot now?" { }
+        "Error"   {
+            puts stderr "ERROR: TFTP restore failed"
+            exit 1
+        }
+        timeout   {
+            puts stderr "ERROR: timed out waiting for TFTP restore"
+            exit 1
+        }
+    }
+
+    send -- "$do_reboot\r"
+
+    if { $do_reboot eq "y" } {
+        # Wait briefly for the reboot to begin; the session will drop.
+        # Ignore errors here — the connection closes as the switch reboots.
+        catch { expect eof }
+    } else {
+        expect "# "
+        send -- "exit\r"
+        catch { expect eof }
+    }
+__END_OF_SCRIPT__
