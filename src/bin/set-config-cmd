@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+
+# Push a config to a Mokerlink switch via SSH, replaying CLI commands.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   set-config-cmd HOSTNAME COMMANDS_FILE
+#
+# DESCRIPTION
+#   Opens an SSH session to HOSTNAME and replays the interactive CLI
+#   commands from COMMANDS_FILE (produced by cfg-to-commands) one line at
+#   a time, waiting for the switch prompt after each.  No TFTP server or
+#   elevated privileges are required.
+#
+#   The command stream is expected to start with "configure terminal" and
+#   end with "end" then "save" (as produced by cfg-to-commands).  After
+#   the save, the script optionally issues "reboot".
+#
+#   SSH flags mirror get-config and set-config-ssh exactly.
+#   All session parameters are passed via EXPECT_* environment variables.
+#
+# POSITIONAL ARGUMENTS
+#   HOSTNAME       Switch hostname or IP address
+#   COMMANDS_FILE  File of CLI commands, one per line (use /dev/stdin to
+#                  pipe from cfg-to-commands)
+#
+# ENVIRONMENT
+#   EXPECT_USERNAME  Login username (default: admin)
+#   EXPECT_PASSWORD  Login password (required)
+#   EXPECT_REBOOT    'y' to reboot after save, 'n' to skip (default: n)
+#   EXPECT_TIMEOUT   Seconds to wait for each prompt (default: 30)
+#   DEBUG            Set to 'true' to enable expect -d tracing
+
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1091
+source /usr/local/include/bash/common-functions
+
+set -o errexit -o errtrace -o nounset -o pipefail
+is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+
+hostname="${1:?need switch hostname or IP}"
+commands_file="${2:?need commands file path}"
+
+[[ -f "${commands_file}" ]] || \
+    error "commands file not found: '${commands_file}'"
+
+expect_args=()
+is_true "${DEBUG}" && expect_args+=(-d)
+
+# Read the commands file into an environment variable so the expect script
+# can iterate over them without needing filesystem access inside the Tcl
+# heredoc.  Newlines are preserved; the Tcl script splits on "\n".
+EXPECT_HOSTNAME="${hostname}" \
+EXPECT_COMMANDS="$(cat "${commands_file}")" \
+EXPECT_USERNAME="${EXPECT_USERNAME:-admin}" \
+EXPECT_PASSWORD="${EXPECT_PASSWORD:?need EXPECT_PASSWORD}" \
+EXPECT_REBOOT="${EXPECT_REBOOT:-n}" \
+EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
+/usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
+    log_user 1
+    set match_max 1000000
+    set timeout   $env(EXPECT_TIMEOUT)
+    set hostname  $env(EXPECT_HOSTNAME)
+    set username  $env(EXPECT_USERNAME)
+    set password  $env(EXPECT_PASSWORD)
+    set do_reboot $env(EXPECT_REBOOT)
+
+    spawn ssh -F /dev/null -T -o LogLevel=quiet \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o HostKeyAlgorithms=+ssh-rsa \
+        -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+        -l $username $hostname
+
+    expect "Username: "
+    send -- "$username\r"
+    expect "Password: "
+    send -- "$password\r"
+    expect "# "
+
+    # Disable the pager so multi-line responses are not interrupted.
+    send -- "terminal length 0\r"
+    expect "# "
+
+    # Replay each command line, waiting for the prompt after each.
+    # The prompt pattern covers both privileged (#) and config sub-mode
+    # prompts which end in ')#' (e.g. Switch(config-if)#).
+    set commands [split $env(EXPECT_COMMANDS) "\n"]
+    foreach cmd $commands {
+        # Skip blank lines that may appear at the start or end of the file.
+        if {[string trim $cmd] eq ""} { continue }
+        send -- "$cmd\r"
+        expect -re {[)#] $}
+    }
+
+    if { $do_reboot eq "y" } {
+        send -- "reboot\r"
+        catch { expect eof }
+    } else {
+        catch {send -- "exit\r"}
+        expect {
+            "> " { catch {send -- "exit\r"} }
+            eof  {}
+            timeout {}
+        }
+        catch {expect eof}
+    }
+__END_OF_SCRIPT__
