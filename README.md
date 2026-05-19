@@ -5,6 +5,7 @@ A CLI tool to download configuration backups from a [Mokerlink managed network s
 ## Contents
 
 - [Contents](#contents)
+- [Invoking the CLI](#invoking-the-cli)
 - [Bootstrap a factory-reset switch](#bootstrap-a-factory-reset-switch)
   - [Serial console (recommended for first boot)](#serial-console-recommended-for-first-boot)
   - [HTTP web UI (no serial cable needed)](#http-web-ui-no-serial-cable-needed)
@@ -25,6 +26,38 @@ A CLI tool to download configuration backups from a [Mokerlink managed network s
   - [Legacy service parameters](#legacy-service-parameters)
 - [Building](#building)
 - [Security](#security)
+
+## Invoking the CLI
+
+`mokerlink-backup` and `mokerlink-restore` are not installed on your host —
+they run inside the `1121citrus/mokerlink-backup` Docker image.  Define these
+shell functions (paste into `~/.bashrc` or `~/.zshrc`) so every example in
+this document works as written from the directory that contains your `secrets/`
+folder.
+
+```bash
+# Download switch configuration to a tar archive or stdout
+mokerlink-backup() {
+    docker run --rm \
+        --volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro" \
+        1121citrus/mokerlink-backup:latest \
+        mokerlink-backup "$@"
+}
+
+# Restore switch configuration — http and ssh-cmd transports (no sudo required)
+mokerlink-restore() {
+    docker run --rm \
+        --volume "$(pwd):/work" --workdir /work \
+        --volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro" \
+        1121citrus/mokerlink-backup:latest \
+        mokerlink-restore "$@"
+}
+```
+
+> **Serial and `ssh` transports** start a TFTP server on port 69/UDP, which
+> requires host networking and elevated privileges.  They cannot be wrapped in
+> a shell function; the bootstrap section shows the full `sudo docker run`
+> form for those transports.
 
 ## Bootstrap a factory-reset switch
 
@@ -62,7 +95,12 @@ SSH or the web UI is reachable.  It requires:
 4. Run the restore command:
 
    ```console
-   $ sudo mokerlink-restore --transport serial --config start-config.cfg
+   $ sudo docker run --rm \
+         --network host --privileged \
+         --volume "$(pwd):/work" --workdir /work \
+         --volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro" \
+         1121citrus/mokerlink-backup:latest \
+         mokerlink-restore --transport serial --config start-config.cfg
    ```
 
    The script auto-detects the serial port (`/dev/cu.usbserial-*` on macOS,
@@ -76,15 +114,20 @@ SSH or the web UI is reachable.  It requires:
 **Options:**
 
 ```text
-sudo mokerlink-restore \
-    --transport serial \
-    --config start-config.cfg \
-    [--host 192.168.2.1]         # default
-    [--port /dev/cu.usbserial-0] # default: auto-detect
-    [--user admin]               # default
-    [--password admin]           # default: factory default
-    [--no-reboot]                # push config only; do not reboot
-    [--no-wait]                  # do not wait for restart
+sudo docker run --rm \
+    --network host --privileged \
+    --volume "$(pwd):/work" --workdir /work \
+    --volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro" \
+    1121citrus/mokerlink-backup:latest \
+    mokerlink-restore \
+        --transport serial \
+        --config start-config.cfg \
+        [--host 192.168.2.1]         # default
+        [--port /dev/cu.usbserial-0] # default: auto-detect
+        [--user admin]               # default
+        [--password admin]           # default: factory default
+        [--no-reboot]                # push config only; do not reboot
+        [--no-wait]                  # do not wait for restart
 ```
 
 ### HTTP web UI (no serial cable needed)
@@ -103,22 +146,26 @@ first boot.
 for TFTP port 69:
 
 ```console
-$ sudo mokerlink-restore \
-    --transport ssh \
-    --config start-config.cfg \
-    --host switch-1 \
-    --password-file /run/secrets/mokerlink-password
+$ sudo docker run --rm \
+      --network host --privileged \
+      --volume "$(pwd):/work" --workdir /work \
+      --volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro" \
+      1121citrus/mokerlink-backup:latest \
+      mokerlink-restore \
+          --transport ssh \
+          --config start-config.cfg \
+          --host switch-1
 ```
 
 **`ssh-cmd` transport** — parses the config file and replays commands
-interactively; no TFTP server and no `sudo` needed:
+interactively; no TFTP server and no `sudo` needed.  Uses the
+`mokerlink-restore` function defined in [Invoking the CLI](#invoking-the-cli):
 
 ```console
 $ mokerlink-restore \
     --transport ssh-cmd \
     --config start-config.cfg \
-    --host switch-1 \
-    --password-file /run/secrets/mokerlink-password
+    --host switch-1
 ```
 
 Both SSH transports use legacy RSA key exchange flags (`+ssh-rsa`) because
@@ -128,11 +175,13 @@ it on every factory reset.
 
 ## Synopsis
 
-`mokerlink-backup` downloads the running, startup, and/or backup configurations
+`mokerlink-backup` is a CLI packaged inside the `1121citrus/mokerlink-backup`
+Docker image.  It downloads the running, startup, and/or backup configurations
 from a [Mokerlink managed network switch](https://www.mokerlink.com/index.php?route=product/product&product_id=396)
 and streams them to stdout as a tar archive or raw text.  The script uses the
 [Cisco-inspired CLI](https://www.mokerlink.com/index.php?route=product/product/download&download_id=20)
-over SSH.
+over SSH.  Define the shell function in [Invoking the CLI](#invoking-the-cli)
+to invoke it without typing the full `docker run` incantation each time.
 
 A backup user must be provisioned on the switch with `Admin` privileges.
 Firewall rules must allow the container to reach the switch's SSH port (22/tcp).
@@ -213,16 +262,19 @@ SYSTEM CONFIG FILE ::= BEGIN
 
 ### Selective download
 
+These examples use the `mokerlink-backup` function defined in
+[Invoking the CLI](#invoking-the-cli).
+
 Include only running and startup configs (exclude backup):
 
 ```console
-mokerlink-backup --host switch -u backup-user -P pw-file --running --startup > partial.tar
+$ mokerlink-backup --host switch -u backup-user --running --startup > partial.tar
 ```
 
 Include all except startup:
 
 ```console
-mokerlink-backup --host switch -u backup-user -P pw-file --no-startup > partial.tar
+$ mokerlink-backup --host switch -u backup-user --no-startup > partial.tar
 ```
 
 ---
