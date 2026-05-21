@@ -23,6 +23,10 @@
 #      --port PORT         Serial device path (serial transport only;
 #                          default: auto-detect /dev/cu.usbserial-* or
 #                          /dev/ttyUSB0)
+#      --tftp-host IP      Local IP the TFTP server listens on and the
+#                          switch is told to pull from (serial and ssh
+#                          transports; env: TFTP_HOST; default:
+#                          auto-detect 192.168.2.x address)
 #   -u,--user USER         Login username (default: admin)
 #   -p,--password PW       Password (env: MOKERLINK_PASSWORD;
 #                          serial default: 'admin')
@@ -40,6 +44,7 @@
 #   MOKERLINK_PASSWORD_FILE
 #                          Path to password file
 #                          (default: /run/secrets/mokerlink-password)
+#   TFTP_HOST              Local IP for TFTP (overridden by --tftp-host)
 #   DEBUG                  Enable debug tracing (default: false)
 #   ENV                    Env-file path (default: ~/.env)
 #
@@ -59,8 +64,12 @@ command=$(basename "${0}")
 bindir=$(readlink -f "$(dirname "${0}")")
 export PATH=${bindir}:${PATH}
 
-# shellcheck disable=SC1091
-source /usr/local/include/bash/common-functions
+# Prefer common-functions from the source tree (one dir up from bindir) so
+# these scripts can be invoked natively on macOS without a Docker container.
+# Falls back to the installed path used inside the Docker image.
+# shellcheck disable=SC1090,SC1091
+source "${bindir}/../common-functions" 2>/dev/null \
+    || source /usr/local/include/bash/common-functions
 
 ENV=${ENV:-${HOME:-/root}/.env}
 set -o errexit -o errtrace -o nounset -o pipefail
@@ -85,6 +94,9 @@ Options:
   -H,--host HOST         Switch IP or hostname (default: 192.168.2.1)
      --port PORT         Serial device path (serial transport only;
                          default: auto-detect)
+     --tftp-host IP      Local IP the TFTP server binds to and the switch
+                         pulls from (serial and ssh transports;
+                         env: TFTP_HOST; default: auto-detect)
   -u,--user USER         Login username (default: admin)
   -p,--password PW       Password (env: MOKERLINK_PASSWORD)
   -P,--password-file FILE
@@ -132,6 +144,8 @@ transport=
 config_file=
 host="${MOKERLINK_HOST:-192.168.2.1}"
 serial_port=
+# --tftp-host flag takes precedence; TFTP_HOST env var is the fallback.
+tftp_host_override="${TFTP_HOST:-}"
 user="admin"
 password="${MOKERLINK_PASSWORD:-}"
 password_file="${MOKERLINK_PASSWORD_FILE:-/run/secrets/mokerlink-password}"
@@ -169,6 +183,11 @@ while [[ $# -gt 0 ]]; do
         --port)
             [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
             serial_port="$2"
+            shift
+            ;;
+        --tftp-host)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            tftp_host_override="$2"
             shift
             ;;
         -u|--user)
@@ -296,8 +315,7 @@ start_tftp() {
     local tftp_host="${1:?need TFTP host}"
     info "starting TFTP server to serve ${config_basename}"
     bash "${bindir}/tftp-serve" \
-        --file "${config_file}" \
-        --address "${tftp_host}" &
+        --file "${config_file}" &
     tftp_pid=$!
     # Give the server a moment to open the port before the switch connects.
     sleep 2
@@ -307,9 +325,9 @@ case "${transport}" in
     serial)
         # Determine the bootstrap host IP on the directly-connected interface.
         # The switch is at 192.168.2.1; the host must be in 192.168.2.x/24.
-        # TFTP_HOST env var overrides auto-detection (useful in tests).
-        if [[ -n "${TFTP_HOST:-}" ]]; then
-            tftp_host="${TFTP_HOST}"
+        # --tftp-host (or TFTP_HOST env var) overrides auto-detection.
+        if [[ -n "${tftp_host_override}" ]]; then
+            tftp_host="${tftp_host_override}"
         else
             tftp_host=$(ip -4 addr show 2>/dev/null \
                 | grep -oP '(?<=inet )192\.168\.2\.\d+' \
@@ -324,7 +342,7 @@ case "${transport}" in
             fi
             [[ -n "${tftp_host}" ]] || \
                 error "cannot determine local IP for TFTP; \
-set TFTP_HOST env var or ensure a 192.168.2.x address is configured"
+use --tftp-host IP or ensure a 192.168.2.x address is configured"
         fi
 
         start_tftp "${tftp_host}"
@@ -345,8 +363,8 @@ set TFTP_HOST env var or ensure a 192.168.2.x address is configured"
         error "http transport not yet implemented"
         ;;
     ssh)
-        if [[ -n "${TFTP_HOST:-}" ]]; then
-            tftp_host="${TFTP_HOST}"
+        if [[ -n "${tftp_host_override}" ]]; then
+            tftp_host="${tftp_host_override}"
         else
             tftp_host=$(ip -4 addr show 2>/dev/null \
                 | grep -oP '(?<=inet )\d+\.\d+\.\d+\.\d+' \
@@ -359,8 +377,7 @@ set TFTP_HOST env var or ensure a 192.168.2.x address is configured"
                     || true)
             fi
             [[ -n "${tftp_host}" ]] || \
-                error "cannot determine local IP for TFTP; \
-set TFTP_HOST env var"
+                error "cannot determine local IP for TFTP; use --tftp-host IP"
         fi
 
         start_tftp "${tftp_host}"

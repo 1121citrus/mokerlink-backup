@@ -254,3 +254,24 @@ teardown() {
         --no-wait
     [ "$status" -eq 0 ]
 }
+
+@test "mokerlink-restore: --tftp-host accepted and used instead of TFTP_HOST env" {
+    run bash "${BIN_DIR}/mokerlink-restore" \
+        --transport serial \
+        --config "${CFG}" \
+        --port "${FAKE_PORT}" \
+        --tftp-host 127.0.0.1 \
+        --no-wait
+    [ "$status" -eq 0 ]
+}
+
+@test "mokerlink-restore: --tftp-host overrides TFTP_HOST env var" {
+    run env TFTP_HOST=10.0.0.1 \
+        bash "${BIN_DIR}/mokerlink-restore" \
+        --transport serial \
+        --config "${CFG}" \
+        --port "${FAKE_PORT}" \
+        --tftp-host 127.0.0.1 \
+        --no-wait
+    [ "$status" -eq 0 ]
+}

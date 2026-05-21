@@ -33,8 +33,9 @@
 bindir=$(readlink -f "$(dirname "${0}")")
 export PATH=${bindir}:${PATH}
 
-# shellcheck disable=SC1091
-source /usr/local/include/bash/common-functions
+# shellcheck disable=SC1090,SC1091
+source "${bindir}/../common-functions" 2>/dev/null \
+    || source /usr/local/include/bash/common-functions
 
 set -o errexit -o errtrace -o nounset -o pipefail
 is_true "${DEBUG:=false}" && set -o xtrace -o verbose
@@ -68,9 +69,12 @@ EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
     set do_reboot $env(EXPECT_REBOOT)
 
     # Open the serial port at 115200/8N1, no flow control.
-    spawn -open [open $port r+]
-    fconfigure $spawn_id -mode 115200,n,8,1 -handshake none \
+    # fconfigure -mode is valid only on a Tcl channel, not on an expect
+    # spawn ID, so configure the channel before passing it to spawn -open.
+    set fd [open $port r+]
+    fconfigure $fd -mode 115200,n,8,1 -handshake none \
         -translation binary -buffering full
+    spawn -open $fd
 
     # Send a carriage return to wake the console and wait for the login
     # prompt.  The switch may be at any state (idle prompt or login screen);

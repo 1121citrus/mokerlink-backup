@@ -75,60 +75,73 @@ hardware is available.
 ### Serial console (recommended for first boot)
 
 The serial transport works on any factory-reset switch regardless of whether
-SSH or the web UI is reachable.  It requires:
+SSH or the web UI is reachable.  It requires a USB-to-serial adapter, the
+RJ45 console cable shipped with the switch, and `sudo` access on the
+bootstrap laptop.
 
-- A USB-to-serial adapter and the RJ45 console cable that shipped with the
-  switch
-- `sudo` access on the bootstrap machine (TFTP uses port 69/UDP)
-- The laptop configured with a `192.168.2.x` address on the directly-connected
-  interface (the switch defaults to `192.168.2.1`)
+> **macOS vs Linux:** Docker Desktop on macOS runs inside a Linux VM.
+> USB serial devices (`/dev/cu.usbserial-*`) and direct network-interface
+> binds are not available inside the VM, so the serial transport must run
+> natively from the repository checkout.  On Linux, Docker has full access
+> to host devices and networking.
 
-**Steps:**
+---
 
-1. Connect the console cable from the USB adapter to the switch's console port.
+#### macOS — native (no Docker)
 
+**Hardware setup:**
+
+1. Connect the USB-to-serial adapter to the switch's RJ45 console port.
 2. Connect an Ethernet cable from the laptop to any switch port.
-
-3. Set the laptop's Ethernet interface to a static address in `192.168.2.0/24`
-   (any address other than `192.168.2.1`).
-
-4. Run the restore command:
+3. Set the Ethernet interface to a static address in `192.168.2.0/24` —
+   for example, `192.168.2.10` (any address other than `192.168.2.1`).
+4. Confirm the switch is reachable:
 
    ```console
-   $ sudo docker run --rm \
-         --network host --privileged \
-         --volume "$(pwd):/work" --workdir /work \
-         --volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro" \
-         1121citrus/mokerlink-backup:latest \
-         mokerlink-restore --transport serial --config start-config.cfg
+   $ ping -c 3 192.168.2.1
    ```
 
-   The script auto-detects the serial port (`/dev/cu.usbserial-*` on macOS,
-   `/dev/ttyUSB0` on Linux).  Use `--port /dev/cu.usbserial-XXXX` to specify
-   it explicitly.
+**Restore command** — run from the repository root:
 
-5. The script starts a TFTP server, opens the console session, pushes the
-   config, reboots the switch, and waits for it to come back up.  The whole
-   process takes about two minutes.
-
-**Options:**
-
-```text
-sudo docker run --rm \
-    --network host --privileged \
-    --volume "$(pwd):/work" --workdir /work \
-    --volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro" \
-    1121citrus/mokerlink-backup:latest \
-    mokerlink-restore \
-        --transport serial \
-        --config start-config.cfg \
-        [--host 192.168.2.1]         # default
-        [--port /dev/cu.usbserial-0] # default: auto-detect
-        [--user admin]               # default
-        [--password admin]           # default: factory default
-        [--no-reboot]                # push config only; do not reboot
-        [--no-wait]                  # do not wait for restart
+```console
+$ sudo bash "$(pwd)/src/bin/mokerlink-restore" \
+      --transport serial \
+      --config start-config.cfg \
+      --tftp-host 192.168.2.10
 ```
+
+- Replace `192.168.2.10` with the IP you configured in step 3.
+- Replace `start-config.cfg` with the configuration file to restore.
+- The serial port is auto-detected (`/dev/cu.usbserial-*`).
+  Use `--port /dev/cu.usbserial-XXXX` to override.
+- The factory-default password (`admin`) is used automatically.
+  Add `--password YOUR_PASS` if the switch already has a custom password.
+
+The script starts the macOS built-in TFTP daemon, opens the serial console,
+pushes the config, and reboots the switch.  Total time: about two minutes.
+
+---
+
+#### Linux — Docker
+
+**Hardware setup:** same steps 1–4 as macOS above.
+
+**Restore command:**
+
+```console
+$ sudo docker run --rm \
+      --network host --privileged \
+      --volume "$(pwd):/work" --workdir /work \
+      --device /dev/ttyUSB0 \
+      1121citrus/mokerlink-backup:latest \
+      mokerlink-restore --transport serial --config start-config.cfg
+```
+
+- Replace `/dev/ttyUSB0` with the actual serial device.
+  Check with `ls /dev/ttyUSB* /dev/ttyACM*`.
+- The factory-default password (`admin`) is used automatically.
+  To supply a custom password, add:
+  `--volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro"`
 
 ### HTTP web UI (no serial cable needed)
 

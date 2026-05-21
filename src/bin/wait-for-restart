@@ -30,8 +30,9 @@
 bindir=$(readlink -f "$(dirname "${0}")")
 export PATH=${bindir}:${PATH}
 
-# shellcheck disable=SC1091
-source /usr/local/include/bash/common-functions
+# shellcheck disable=SC1090,SC1091
+source "${bindir}/../common-functions" 2>/dev/null \
+    || source /usr/local/include/bash/common-functions
 
 set -o errexit -o errtrace -o nounset -o pipefail
 is_true "${DEBUG:=false}" && set -o xtrace -o verbose
