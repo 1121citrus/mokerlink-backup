@@ -98,6 +98,13 @@ teardown() {
     [[ "$output" == *"--transport"* ]]
 }
 
+@test "mokerlink-restore: -h exits 0 and prints usage" {
+    run bash "${BIN_DIR}/mokerlink-restore" -h
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Usage:"* ]]
+    [[ "$output" == *"--transport"* ]]
+}
+
 @test "mokerlink-restore: --version exits 0" {
     run bash "${BIN_DIR}/mokerlink-restore" --version
     [ "$status" -eq 0 ]

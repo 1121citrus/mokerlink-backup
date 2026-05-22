@@ -84,9 +84,6 @@ mokerlink-restore() {
 }
 ```
 
-> **Note on `-h`:** There is no `-h` flag — `-H` (uppercase) is the host
-> option.  Use `-?` or `--help` to display help text.
-
 ### Secrets
 
 Both CLIs read credentials from files in a `secrets/` directory relative to
@@ -710,7 +707,7 @@ mokerlink-backup [options]
 Download a backup of a Mokerlink managed network switch.
 
 Options:
-  -?,--help              Display this help text
+  -h,-?,--help           Display this help text
   -v,--version           Display command version
   -a,--all               Include all configurations (default)
   -r,--running           Include running configuration
@@ -752,7 +749,7 @@ mokerlink-restore --transport TRANSPORT --config FILE [options]
 Push a configuration file to a Mokerlink switch and reboot it.
 
 Options:
-  -?,--help              Display this help text
+  -h,-?,--help           Display this help text
   -v,--version           Display command version
   -t,--transport TRANS   Transport: serial, http, ssh, ssh-cmd (required)
   -c,--config FILE       Configuration file to push (required)

@@ -153,6 +153,15 @@ teardown() {
     [[ "${output}" == *"Usage:"* ]]
 }
 
+@test "-h exits 0 and prints usage" {
+    local output result
+    output=$(run_mokerlink_backup_args -h 2>&1)
+    result=$?
+    echo "output: ${output}"
+    [ "${result}" -eq 0 ]
+    [[ "${output}" == *"Usage:"* ]]
+}
+
 @test "--version exits 0" {
     run run_mokerlink_backup_args --version
     [ "$status" -eq 0 ]

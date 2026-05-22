@@ -22,7 +22,7 @@
 #   --port PORT        TCP port to poll (default: 80)
 #   --timeout SECS     Total seconds to wait (default: 120)
 #   --interval SECS    Seconds between polls (default: 5)
-#   --help             Display this help text
+#   -h,--help          Display this help text
 #
 # ENVIRONMENT
 #   DEBUG              Enable debug tracing (default: false)
@@ -48,7 +48,7 @@ Options:
   --port PORT        TCP port to poll (default: 80)
   --timeout SECS     Total seconds to wait before giving up (default: 120)
   --interval SECS    Seconds between connection attempts (default: 5)
-  --help             Display this help text
+  -h,--help          Display this help text
 
 Exits 0 when the switch responds, 1 if it does not respond within timeout.
 EOF
@@ -85,7 +85,7 @@ while [[ $# -gt 0 ]]; do
             wait_interval="$2"
             shift
             ;;
-        --help)
+        -h|--help)
             show_help
             exit 0
             ;;

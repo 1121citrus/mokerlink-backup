@@ -27,7 +27,7 @@
 #                      the basename of this path
 #   --address ADDR     IP address to bind (default: 0.0.0.0)
 #   --timeout SECS     Seconds to keep the server running (default: 120)
-#   --help             Display this help text
+#   -h,--help          Display this help text
 #
 # ENVIRONMENT
 #   DEBUG              Enable debug tracing (default: false)
@@ -52,7 +52,7 @@ Options:
   --file FILE        File to serve via TFTP (required)
   --address ADDR     Bind address (default: 0.0.0.0)
   --timeout SECS     Seconds to keep server running (default: 120)
-  --help             Display this help text
+  -h,--help          Display this help text
 
 The TFTP server listens on port 69 (UDP), which requires root.
 On macOS: run with sudo.
@@ -88,7 +88,7 @@ while [[ $# -gt 0 ]]; do
             timeout_secs="$2"
             shift
             ;;
-        --help)
+        -h|--help)
             show_help
             exit 0
             ;;

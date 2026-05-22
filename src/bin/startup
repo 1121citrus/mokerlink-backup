@@ -9,7 +9,7 @@
 #   startup [options]
 #
 # OPTIONS
-#   -?,--help     Display this help text
+#   -h,-?,--help  Display this help text
 #   -v,--version  Display command version
 #
 # ENVIRONMENT
@@ -56,7 +56,7 @@ show_version() {
 # Handle --help and --version before service initialisation.
 for _startup_arg in "$@"; do
     case "${_startup_arg}" in
-        -\?|--help)    show_help;    exit 0 ;;
+        -h|-\?|--help)    show_help;    exit 0 ;;
         -v|--version)  show_version; exit 0 ;;
         --)            break ;;
         -*)            error "unknown option: '${_startup_arg}'" ;;

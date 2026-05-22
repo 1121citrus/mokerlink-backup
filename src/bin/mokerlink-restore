@@ -14,7 +14,7 @@
 #   it to come back up.
 #
 # OPTIONS
-#   -?,--help              Display this help text
+#   -h,-?,--help           Display this help text
 #   -v,--version           Display command version
 #   -t,--transport TRANS   Transport: serial, http, ssh, ssh-cmd (required)
 #   -c,--config FILE       Config file to push (required)
@@ -87,7 +87,7 @@ Usage: mokerlink-restore --transport TRANSPORT --config FILE [options]
 Push a configuration file to a Mokerlink switch and reboot it.
 
 Options:
-  -?,--help              Display this help text
+  -h,-?,--help           Display this help text
   -v,--version           Display command version
   -t,--transport TRANS   Transport: serial, http, ssh, ssh-cmd (required)
   -c,--config FILE       Configuration file to push (required)
@@ -157,7 +157,7 @@ wait_for_restart=
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -\?|--help)
+        -h|-\?|--help)
             show_help
             exit 0
             ;;

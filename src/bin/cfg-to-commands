@@ -42,7 +42,7 @@
 #   CRLF line endings are normalised to LF.
 #
 # OPTIONS
-#   --help     Display this help text
+#   -h,--help  Display this help text
 #
 # ENVIRONMENT
 #   DEBUG      Enable debug tracing (default: false)
@@ -56,7 +56,7 @@ source /usr/local/include/bash/common-functions
 set -o errexit -o errtrace -o nounset -o pipefail
 is_true "${DEBUG:=false}" && set -o xtrace -o verbose
 
-if [[ "${1:-}" == "--help" ]]; then
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     cat <<'EOF'
 Usage: cfg-to-commands [FILE]
 
