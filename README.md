@@ -25,6 +25,7 @@ SSH+TFTP, and SSH command replay — covering both factory-reset switches
   - [One-shot backup](#one-shot-backup)
   - [Scheduled backup (cron service)](#scheduled-backup-cron-service)
   - [Verify a backup](#verify-a-backup)
+  - [Serial backup](#serial-backup)
 - [Restore](#restore)
   - [Transports](#transports)
   - [Restore a running switch (SSH)](#restore-a-running-switch-ssh)
@@ -115,6 +116,9 @@ $ printf '%s' 'your-gpg-passphrase' > secrets/gpg-passphrase
 
 Both backup modes connect to the switch over SSH.  The switch must be
 reachable on port 22, and the backup user must be configured.
+
+For offline or recovery scenarios where SSH is unavailable, see
+[Serial backup](#serial-backup) below.
 
 ### One-shot backup
 
@@ -257,6 +261,51 @@ $ aws s3 cp --quiet \
     | bunzip2 | sha256sum
 3b4c5d6e...  -
 ```
+
+---
+
+### Serial backup
+
+The serial transport issues `show` commands over the console cable and captures
+the output directly — no TFTP server and no `sudo` required.  Use it when the
+switch is unreachable over SSH (factory-reset state, locked-out credentials,
+network misconfiguration).
+
+> **macOS vs Linux:** Docker Desktop on macOS cannot access USB serial devices
+> (`/dev/cu.usbserial-*`).  Run natively from the repository checkout on macOS.
+> On Linux, Docker with `--device` works.
+
+#### macOS — native (no Docker)
+
+**Hardware setup:** Connect the USB-to-serial adapter to the console port.
+The switch does not need to be on any particular network — serial is a direct
+connection.
+
+```console
+$ bash "$(pwd)/src/bin/mokerlink-backup" \
+      --transport serial \
+      --running \
+      --format raw
+```
+
+- The serial port is auto-detected (`/dev/cu.usbserial-*`).
+  Use `--port /dev/cu.usbserial-XXXX` to override.
+- The factory-default password (`admin`) is used automatically.
+  Set `MOKERLINK_PASSWORD` or use `--password` if the switch has a custom
+  password.
+- Omit `--running --format raw` to get all three configs as a tar archive.
+
+#### Linux — Docker
+
+```console
+$ docker run --rm \
+      --device /dev/ttyUSB0 \
+      --volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro" \
+      1121citrus/mokerlink-backup:latest \
+      mokerlink-backup --transport serial --port /dev/ttyUSB0 --running --format raw
+```
+
+Replace `/dev/ttyUSB0` with the actual serial device (`ls /dev/ttyUSB* /dev/ttyACM*`).
 
 ---
 
@@ -709,6 +758,7 @@ Download a backup of a Mokerlink managed network switch.
 Options:
   -h,-?,--help           Display this help text
   -v,--version           Display command version
+  -t,--transport TRANS   Transport: ssh (default) or serial
   -a,--all               Include all configurations (default)
   -r,--running           Include running configuration
      --no-running        Exclude running configuration
@@ -718,7 +768,10 @@ Options:
      --no-backup         Exclude backup configuration
   -f,--format FMT        Output format: 'raw' or 'tar'
                          (env: MOKERLINK_FORMAT; default: 'tar')
-  -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST)
+  -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST;
+                         ssh transport only)
+     --port PORT         Serial device path (serial transport only;
+                         default: auto-detect)
   -u,--user USER         SSH username (env: MOKERLINK_USER;
                          default: remote-backup)
   -p,--password PW       Password (env: MOKERLINK_PASSWORD)
@@ -729,7 +782,9 @@ Options:
 
 | Parameter | Option | Environment variable | Default |
 |---|---|---|---|
+| Transport | `-t`, `--transport` | — | `ssh` |
 | Host | `-H`, `--host` | `MOKERLINK_HOST` | `${TAILSCALE_HOST}` |
+| Serial port | `--port` | — | auto-detect |
 | User | `-u`, `--user` | `MOKERLINK_USER` | `remote-backup` |
 | Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | _none_ |
 | Password file | `-P`, `--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` |

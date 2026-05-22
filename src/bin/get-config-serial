@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+
+# Fetch a Mokerlink switch configuration via serial console.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   get-config-serial PORT CONFIG_TYPE
+#
+# DESCRIPTION
+#   Opens a serial console session (115200/8N1/no-flow) to the Mokerlink
+#   switch on PORT, logs in, issues 'show CONFIG_TYPE-config', captures the
+#   output, and writes it to stdout.  No TFTP server is required.
+#
+#   The firmware echoes the command twice before emitting the config body;
+#   those two echo-back lines are stripped before the output reaches the caller.
+#
+# POSITIONAL ARGUMENTS
+#   PORT         Serial device path (e.g. /dev/cu.usbserial-0001)
+#   CONFIG_TYPE  Configuration to fetch: running, startup, or backup
+#
+# ENVIRONMENT
+#   EXPECT_USERNAME  Login username (default: admin)
+#   EXPECT_PASSWORD  Login password (default: admin)
+#   EXPECT_TIMEOUT   Seconds to wait for each prompt (default: 30)
+#   DEBUG            Set to 'true' to enable expect -d tracing
+
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1090,SC1091
+source "${bindir}/../common-functions" 2>/dev/null \
+    || source /usr/local/include/bash/common-functions
+
+set -o errexit -o errtrace -o nounset -o pipefail
+is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+
+port="${1:?need serial port (e.g. /dev/cu.usbserial-0001)}"
+config_type="${2:?need config type (running|startup|backup)}"
+config_type=$(printf '%s' "${config_type}" | tr '[:upper:]' '[:lower:]')
+case "${config_type}" in
+    running|startup|backup) ;;
+    *) error "unknown config type: '${config_type}' (expected: running, startup, or backup)" ;;
+esac
+
+expect_args=()
+is_true "${DEBUG}" && expect_args+=(-d)
+
+__get_config_raw__() {
+    # Parameters are exported as EXPECT_* variables and read inside the Tcl
+    # script via $env(...).  The heredoc delimiter is single-quoted so bash
+    # does not expand the Tcl $env() references before expect reads them.
+    EXPECT_PORT="${port}" \
+    EXPECT_CONFIG_TYPE="${config_type}" \
+    EXPECT_USERNAME="${EXPECT_USERNAME:-admin}" \
+    EXPECT_PASSWORD="${EXPECT_PASSWORD:-admin}" \
+    EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
+    /usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
+        log_user 1
+        # Increase match_max for large switch configs (ACLs, routing tables, port
+        # definitions).  Default 2000 is too small.
+        set match_max 1000000
+        set timeout     $env(EXPECT_TIMEOUT)
+        set port        $env(EXPECT_PORT)
+        set config_type $env(EXPECT_CONFIG_TYPE)
+        set username    $env(EXPECT_USERNAME)
+        set password    $env(EXPECT_PASSWORD)
+
+        # Open the serial port at 115200/8N1, no flow control.
+        # fconfigure -mode is valid only on a Tcl channel, not on an expect
+        # spawn ID, so configure the channel before passing it to spawn -open.
+        set fd [open $port r+]
+        fconfigure $fd -mode 115200,n,8,1 -handshake none \
+            -translation binary -buffering full
+        spawn -open $fd
+
+        # Send a carriage return to wake the console and wait for the login
+        # prompt.  The switch may be at any state (idle prompt or login screen);
+        # the two-level expect handles both.
+        log_user 0
+        send -- "\r"
+        expect {
+            "Username: " { }
+            "# "         {
+                # Already logged in from a previous session; log out first.
+                send -- "exit\r"
+                expect "Username: "
+            }
+            timeout {
+                # No prompt — try one more CR before giving up.
+                send -- "\r"
+                expect "Username: "
+            }
+        }
+
+        send -- "$username\r"
+        expect "Password: "
+        send -- "$password\r"
+
+        # Wait for the privileged exec prompt (#).  The switch may show a
+        # user-exec prompt (>) first; send 'enable' if needed.
+        expect {
+            "# " { }
+            "> " {
+                send -- "enable\r"
+                expect "# "
+            }
+        }
+
+        # Disable the output pager so the full config streams without
+        # --More-- interruptions.
+        send -- "terminal length 0\r"
+        expect "# "
+
+        # Issue the show command and capture exactly the output between the
+        # command echo and the next prompt.  log_user 0/1 gates what reaches
+        # the caller's stdout; the login sequence above is suppressed.
+        send -- "show $config_type-config\r"
+        log_user 1
+        expect "# "
+        log_user 0
+
+        # Clean up the session.  Use catch because some firmware builds close
+        # the channel automatically; in that case the exits are unnecessary.
+        catch { send -- "exit\r" }
+        expect {
+            "> " { catch { send -- "exit\r" } }
+            eof  {}
+            timeout {}
+        }
+        catch { expect eof }
+__END_OF_SCRIPT__
+}
+
+# The firmware echoes the command twice before emitting the config body:
+#   show running-config\r\n
+#   show running-config\r\n
+#   SYSTEM CONFIG FILE ::= BEGIN
+#   ...
+# Strip those two echo-back lines so only the config body reaches stdout.
+__get_config_raw__ | tail -n +3

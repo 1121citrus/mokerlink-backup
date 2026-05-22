@@ -33,6 +33,7 @@
 # OPTIONS
 #   -h,-?,--help           Display this help text
 #   -v,--version           Display command version
+#   -t,--transport TRANS   Transport: ssh (default) or serial
 #   -a,--all               Include all configurations (default)
 #   -r,--running           Include running configuration
 #      --no-running        Exclude running configuration
@@ -42,7 +43,11 @@
 #      --no-backup         Exclude backup configuration
 #   -f,--format FMT        Output format: 'raw' or 'tar'
 #                          (env: MOKERLINK_FORMAT; default: 'tar')
-#   -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST)
+#   -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST;
+#                          ssh transport only)
+#      --port PORT         Serial device path (serial transport only;
+#                          default: auto-detect /dev/cu.usbserial-* or
+#                          /dev/ttyUSB0)
 #   -u,--user USER         SSH username (env: MOKERLINK_USER;
 #                          default: remote-backup)
 #   -p,--password PW       Password (env: MOKERLINK_PASSWORD)
@@ -95,6 +100,7 @@ Download a backup of a Mokerlink managed network switch.
 Options:
   -h,-?,--help           Display this help text
   -v,--version           Display command version
+  -t,--transport TRANS   Transport: ssh (default) or serial
   -a,--all               Include all configurations (default)
   -r,--running           Include running configuration
      --no-running        Exclude running configuration
@@ -104,7 +110,10 @@ Options:
      --no-backup         Exclude backup configuration
   -f,--format FMT        Output format: 'raw' or 'tar'
                          (env: MOKERLINK_FORMAT; default: 'tar')
-  -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST)
+  -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST;
+                         ssh transport only)
+     --port PORT         Serial device path (serial transport only;
+                         default: auto-detect)
   -u,--user USER         SSH username (env: MOKERLINK_USER;
                          default: remote-backup)
   -p,--password PW       Password (env: MOKERLINK_PASSWORD)
@@ -116,9 +125,12 @@ Note: The switch is accessed via SSH using legacy algorithms required by the
 Mokerlink firmware. See the README for security considerations.
 
 Examples:
-  # Download all configuration as a tarball:
+  # Download all configuration as a tarball over SSH:
   mokerlink-backup --host switch --user backup-user \
       --password-file secret-pw-file > switch-backup.tar
+
+  # Download the running config over serial console:
+  mokerlink-backup --transport serial --running --format raw
 
   # Print the running switch configuration to stdout:
   mokerlink-backup --host switch --user backup-user \
@@ -131,6 +143,8 @@ show_version() {
 }
 
 # Defaults from environment
+transport="ssh"
+serial_port=
 format="${MOKERLINK_FORMAT:-tar}"
 host="${MOKERLINK_HOST:-${TAILSCALE_HOST:-}}"
 user="${MOKERLINK_USER:-remote-backup}"
@@ -159,6 +173,16 @@ while [[ $# -gt 0 ]]; do
         -v|--version)
             show_version
             exit 0
+            ;;
+        -t|--transport)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            transport="$2"
+            shift
+            ;;
+        --port)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            serial_port="$2"
+            shift
             ;;
         -a|--all)
             has_positive=true
@@ -241,6 +265,12 @@ if "${exclude_running}"; then select_running=false; fi
 if "${exclude_startup}"; then select_startup=false; fi
 if "${exclude_backup}"; then select_backup=false; fi
 
+# Validate transport
+case "${transport}" in
+    ssh|serial) ;;
+    *) error "unknown transport: '${transport}' (expected: ssh or serial)" ;;
+esac
+
 # Validate format
 case "${format}" in
     raw|tar) ;;
@@ -252,12 +282,40 @@ if ! is_true "${select_running}" && ! is_true "${select_startup}" && ! is_true "
     error "no configurations selected (all excluded)"
 fi
 
-# Resolve connection parameters
-[[ -n "${host}" ]] || error 'need MOKERLINK_HOST or TAILSCALE_HOST (or --host / -H)'
-if [[ -z "${password}" ]] && [[ -r "${password_file}" ]]; then
-    password=$(cat "${password_file}")
+# Resolve transport-specific connection parameters.
+if [[ "${transport}" == "ssh" ]]; then
+    [[ -n "${host}" ]] || \
+        error 'need MOKERLINK_HOST or TAILSCALE_HOST (or --host / -H)'
+    if [[ -z "${password}" ]] && [[ -r "${password_file}" ]]; then
+        password=$(cat "${password_file}")
+    fi
+    [[ -n "${password}" ]] || \
+        error 'need MOKERLINK_PASSWORD, --password, or --password-file \
+(default: /run/secrets/mokerlink-password)'
+else
+    # Serial transport: auto-detect port when --port not given.
+    if [[ -z "${serial_port}" ]]; then
+        for _candidate in \
+                /dev/cu.usbserial-* \
+                /dev/ttyUSB0 \
+                /dev/ttyACM0; do
+            if [[ -c "${_candidate}" ]]; then
+                serial_port="${_candidate}"
+                info "auto-detected serial port: ${serial_port}"
+                break
+            fi
+        done
+        [[ -n "${serial_port}" ]] || \
+            error "no serial port found; specify with --port \
+(tried /dev/cu.usbserial-*, /dev/ttyUSB0, /dev/ttyACM0)"
+    fi
+    # Serial backup: use provided password, file, or silently default to
+    # the factory default 'admin'.
+    if [[ -z "${password}" ]] && [[ -r "${password_file}" ]]; then
+        password=$(cat "${password_file}")
+    fi
+    [[ -n "${password}" ]] || password="admin"
 fi
-[[ -n "${password}" ]] || error 'need MOKERLINK_PASSWORD, --password, or --password-file (default: /run/secrets/mokerlink-password)'
 
 info "begin ${command}"
 
@@ -283,10 +341,21 @@ is_true "${select_backup}" && configs+=(backup)
 for config in "${configs[@]}"; do
     info "download '${config}' configuration from '${host}'"
     config_tmp=$(mktemp)
-    # Pass password via env var rather than as a positional arg to avoid
-    # exposing it in the process list (visible to ps(1)).
-    MOKERLINK_PASSWORD="${password}" \
-        bash "${bindir}/get-config" "${config}" "${host}" "${user}" >> "${config_tmp}"
+    if [[ "${transport}" == "serial" ]]; then
+        info "download '${config}' configuration via serial ${serial_port}"
+        # Pass credentials via env vars to avoid process-list exposure.
+        EXPECT_USERNAME="${user}" \
+        EXPECT_PASSWORD="${password}" \
+            bash "${bindir}/get-config-serial" "${serial_port}" "${config}" \
+            >> "${config_tmp}"
+    else
+        info "download '${config}' configuration from '${host}'"
+        # Pass password via env var rather than as a positional arg to avoid
+        # exposing it in the process list (visible to ps(1)).
+        MOKERLINK_PASSWORD="${password}" \
+            bash "${bindir}/get-config" "${config}" "${host}" "${user}" \
+            >> "${config_tmp}"
+    fi
     # Extract version from "! System Version:  v1.0.0.27":
     #   cut -f2 -d:  → "  v1.0.0.27" (field after first colon)
     #   sed 1        → strip leading whitespace
