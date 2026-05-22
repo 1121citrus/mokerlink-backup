@@ -35,8 +35,12 @@ voice-vlan oui-table 00:60:B9 "NEC/Philips"
 voice-vlan oui-table 00:0F:E2 "H3C"
 voice-vlan oui-table 00:09:6E "Avaya"
 !
+! MST region name must be a stable string — do NOT use the switch hardware
+! MAC address here.  If you use the MAC, replacing the switch hardware will
+! change the name, trigger spanning-tree reconvergence, and cause a brief
+! network outage.  Use a fixed hostname or site label instead.
 spanning-tree mst configuration
- name "<SWITCH-BASE-MAC>"
+ name "<SWITCH-HOSTNAME>"
 !
 ! Add interface configuration here, e.g.:
 ! interface GE1

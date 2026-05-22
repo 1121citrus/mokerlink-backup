@@ -10,6 +10,15 @@ A CLI tool to download configuration backups from a [Mokerlink managed network s
   - [Serial console (recommended for first boot)](#serial-console-recommended-for-first-boot)
   - [HTTP web UI (no serial cable needed)](#http-web-ui-no-serial-cable-needed)
   - [SSH transports (running switch only)](#ssh-transports-running-switch-only)
+- [Hardware swap — restore from factory reset](#hardware-swap--restore-from-factory-reset)
+  - [Prerequisites](#prerequisites)
+  - [Phase 1 — Prepare before touching any cables](#phase-1--prepare-before-touching-any-cables)
+  - [Phase 2 — Bootstrap the replacement switch](#phase-2--bootstrap-the-replacement-switch)
+  - [Phase 3 — Transfer cables](#phase-3--transfer-cables)
+  - [Phase 4 — Cutover](#phase-4--cutover)
+  - [Phase 5 — Verify](#phase-5--verify)
+  - [Rollback](#rollback)
+  - [Troubleshooting the swap](#troubleshooting-the-swap)
 - [Synopsis](#synopsis)
 - [CLI Usage](#cli-usage)
 - [Examples](#examples)
@@ -185,6 +194,314 @@ Both SSH transports use legacy RSA key exchange flags (`+ssh-rsa`) because
 the Mokerlink firmware does not support modern key exchange algorithms.  The
 switch host key is accepted unconditionally because the firmware regenerates
 it on every factory reset.
+
+## Hardware swap — restore from factory reset
+
+Use this procedure when replacing a failed or damaged switch with a new unit
+of the same model.  The goal is to make the replacement switch electrically
+transparent to the rest of the network — same configuration, same port
+assignments, minimal disruption.
+
+> **Estimated disruption:** 5–10 minutes from cable transfer to full network
+> recovery, assuming all preparation steps are done in advance.
+>
+> **Rollback at any point:** transfer all cables back to the original switch.
+> The network heals within seconds.  Keep the original switch powered and
+> uncabled until Phase 5 verification passes — it is your safety net.
+
+---
+
+### Prerequisites
+
+Before starting, confirm you have:
+
+- [ ] A verified backup configuration file (`start-config.cfg`) from the
+      switch being replaced
+- [ ] The USB-to-serial adapter and the RJ45 console cable shipped with
+      the switch
+- [ ] Admin access to the firewall web UI or SSH console
+- [ ] The replacement switch (factory reset, still in bootstrap state)
+- [ ] The laptop with this repository checked out and `sudo` access
+
+---
+
+### Phase 1 — Prepare before touching any cables
+
+Complete these steps while the original switch is still running and the
+network is healthy.
+
+#### 1.1 — Find the replacement switch's MAC address
+
+The base MAC address is printed on the label on the bottom of the unit.
+Write it down — you need it in the next step.
+
+The switch uses a block of MAC addresses for its ports, all derived from
+the base MAC.  The management interface uses the base MAC directly.
+
+#### 1.2 — Update the DHCP reservation on the firewall
+
+The firewall assigns the switch its fixed management IP via a DHCP
+reservation keyed to the switch's MAC address.[^dhcp-mac]  The replacement
+unit has a different MAC and will not receive the reserved IP unless the
+reservation is updated first.
+
+On **pfSense / OPNsense**:
+
+- Navigate to **Services → DHCP Server → [management VLAN interface]**
+- Scroll to **DHCP Static Mappings**
+- Find the entry for the switch and replace the MAC address with the
+  replacement unit's base MAC
+- Save — no service restart required
+
+> **Why before Phase 3?** If skipped, the replacement switch gets a
+> random DHCP address.  Locating it later requires serial console access.
+
+#### 1.3 — Check the spanning-tree MST region name in the config file
+
+Open `start-config.cfg` and find this block:
+
+```text
+spanning-tree mst configuration
+ name "..."
+```
+
+If the `name` field contains a MAC address (hex octets separated by
+colons, e.g. `"1C:2A:A3:1D:0F:99"`), it is set to the **old switch's
+hardware MAC**.[^mst]  Change it to a stable, hardware-independent
+identifier — the switch hostname works well:
+
+```text
+spanning-tree mst configuration
+ name "switch-1"
+```
+
+Save the updated config file before proceeding.
+
+---
+
+### Phase 2 — Bootstrap the replacement switch
+
+Follow the [serial console procedure](#serial-console-recommended-for-first-boot)
+using the replacement switch and the config file updated in Phase 1.
+
+Summary of what that procedure does:
+
+1. Connect the USB-to-serial adapter to the replacement switch's console port.
+2. Connect a direct Ethernet cable between the laptop and any switch port;
+   set the laptop's interface to a static address in `192.168.2.0/24`
+   (e.g., `192.168.2.10`).
+3. Run `mokerlink-restore --transport serial --config start-config.cfg
+   --tftp-host 192.168.2.10` to push the config and reboot the switch.
+4. Remove the bootstrap cabling (serial adapter and direct Ethernet).
+
+At the end of Phase 2, the replacement switch holds the production
+configuration.  The original switch is still running with all production
+cables attached.
+
+---
+
+### Phase 3 — Transfer cables
+
+1. **Photograph the current cable layout** before touching anything.
+   A photo is faster and more reliable than re-reading port labels when
+   re-cabling under pressure.
+
+2. Transfer every cable from the original switch to the replacement switch,
+   **matching port numbers exactly**: port 1 → port 1, port 2 → port 2,
+   and so on.
+
+3. Leave the original switch powered but uncabled — it is the rollback
+   target if anything goes wrong.
+
+---
+
+### Phase 4 — Cutover
+
+> **Order matters.** The ARP flush (step 4.2) must happen before the
+> router reboot (step 4.4) so that the router re-learns MAC addresses
+> from a clean state rather than re-populating its cache from stale data.
+
+#### 4.1 — Wait for the replacement switch to finish booting
+
+After the last cable is seated, wait for the port LEDs to stabilize
+(approximately 60 seconds).  The switch is running the production config
+at this point but the rest of the network still has stale Layer-2
+information.
+
+#### 4.2 — Flush the ARP table on the firewall  ⚠ critical step
+
+**This is the most important and most easily missed step.**
+
+When the replacement switch comes up, every IP address in the network is
+unchanged but every MAC address has changed.  The firewall's ARP cache
+still maps those IPs to the old switch's physical addresses.[^arp]
+Until the cache is flushed, packets for the switch management IP and for
+any device that did not reboot will be silently dropped.
+
+**pfSense / OPNsense — web UI:**
+Diagnostics → ARP Table → **Clear ARP Table**
+
+**pfSense / OPNsense — SSH or console shell:**
+
+```console
+# arp -d -a
+```
+
+**Generic Linux firewall / router:**
+
+```console
+# ip neigh flush all
+```
+
+#### 4.3 — Flush the ARP table on any other Layer-3 device
+
+If there is a separate upstream router between the firewall and the ISP,
+reboot it or flush its ARP table via its management interface.  The same
+stale-cache problem applies to any device that has a MAC-to-IP mapping
+for addresses in your network.
+
+#### 4.4 — Reboot the router
+
+A full reboot clears any remaining Layer-2 forwarding tables and ARP
+state that a manual flush might not reach.  For most home routers,
+power-cycling is the safest approach.  Wait for the router to finish
+booting (~90 seconds) before running verification.
+
+---
+
+### Phase 5 — Verify
+
+Allow two minutes for all devices to re-register after the router
+comes back up, then confirm:
+
+| Check | Command / location | Expected result |
+|---|---|---|
+| Switch responds to ping | `ping -c 3 <SWITCH-IP>` | Replies, <2 ms |
+| Switch web UI loads | Browser → `http://<SWITCH-IP>` | Login page loads |
+| Firewall ARP table | Diagnostics → ARP Table | Switch entry shows **new** MAC |
+| DHCP lease table | Services → DHCP Leases | Switch shows correct reserved IP |
+| Upstream connectivity | Speed test from a wired client | Completes without failure |
+| All managed VLANs | Ping a device on each VLAN | All reply |
+
+If all checks pass: power off the original switch.
+
+If any check fails: see [Rollback](#rollback) and
+[Troubleshooting the swap](#troubleshooting-the-swap) below.
+
+---
+
+### Rollback
+
+If the network does not recover fully within five minutes of Phase 4:
+
+1. Transfer all cables back to the original switch (Phase 3 in reverse).
+2. The network heals within seconds — the original switch never lost power.
+3. Flush the firewall ARP table again (step 4.2) to clear any state
+   accumulated during the failed cutover.
+
+Investigate the failure before attempting the swap again.
+
+---
+
+### Troubleshooting the swap
+
+#### Switch management IP unreachable
+
+Most common cause: stale ARP entry on the firewall.  Verify:
+
+```console
+# arp -n <SWITCH-IP>
+```
+
+If the output shows the **old** MAC address, the flush in step 4.2 did
+not complete.  Repeat the flush; then ping the switch immediately to
+trigger fresh ARP resolution.
+
+If no entry appears at all, the DHCP reservation (step 1.2) may not have
+been updated.  Connect via serial console to check the management IP the
+switch actually received.
+
+#### Firewall CPU spikes to ~100% every 1–2 minutes
+
+Cause: the firewall has stale ARP entries for multiple IPs simultaneously.
+It is sending ARP probes, receiving no reply, and retrying on a
+~90-second cycle.[^arp-retry]
+
+Fix: repeat step 4.2 (flush all ARP).  If specific devices remain
+unreachable, reboot those devices — when they come back up they send a
+*gratuitous ARP* that immediately updates every neighbour's cache.[^garp]
+
+#### Port LEDs flapping or intermittent connectivity after reboot
+
+Cause: if step 1.3 was skipped and the `spanning-tree mst configuration
+name` still contains the old switch's hardware MAC, spanning tree treats
+the replacement as a different MST region.[^mst]  Every uplink port goes
+through a Listening → Learning → Forwarding convergence cycle
+(~30–50 seconds) rather than transitioning instantly.
+
+Fix: update `start-config.cfg` per step 1.3, re-push via `ssh-cmd`
+transport, and reboot the switch:
+
+```console
+$ mokerlink-restore \
+    --transport ssh-cmd \
+    --config start-config.cfg \
+    --host <SWITCH-IP>
+```
+
+---
+
+### Background
+
+[^dhcp-mac]: **DHCP reservations are keyed to MAC address.**  DHCP works
+by assigning IPs to clients identified by their MAC (hardware) address.
+A static mapping or reservation tells the DHCP server "always give this
+MAC this IP."  Because the replacement switch has a different MAC than
+the original, it presents as a completely unknown client.  Depending on
+firewall policy it either receives a dynamic address from the general
+pool, or is denied entirely.
+
+[^mst]: **Spanning Tree MST region name.**  IEEE 802.1s Multiple Spanning
+Tree groups switches into *regions* — switches agree on the same region
+name, revision number, and VLAN-to-instance table before they form a
+region together.  Switches in different regions see each other as a
+single opaque bridge at the boundary and re-run spanning tree across that
+boundary.  If the region name is a hardware MAC address, a replacement
+switch will advertise a different name, causing the uplink to go through
+a full STP convergence cycle (~30–50 s) on every reboot and potentially
+a brief forwarding loop during the transition.  A fixed hostname-based
+name eliminates this entirely.  See
+[IEEE 802.1s](https://www.ieee802.org/1/pages/802.1s.html) for the
+specification.
+
+[^arp]: **ARP caching.**  ARP (Address Resolution Protocol, RFC 826) is
+how Layer-3 devices find the Layer-2 MAC address for a known IP.  The
+result is cached in an *ARP table* — typically for 10–20 minutes on
+Linux/BSD, longer on some commercial devices — to avoid broadcasting an
+ARP request on every packet.  When a switch is replaced, the IPs stay
+the same but the MACs change.  Any device with a stale ARP entry for an
+address on or behind the switch will silently drop packets until the
+entry expires or is manually cleared.
+
+[^arp-retry]: **ARP probe retry cycle.**  When a cached ARP entry is
+about to expire, the host first sends a unicast *probe* to the cached MAC.
+If there is no reply (because the hardware is gone), it falls back to a
+broadcast ARP *request*.  On Linux the default probe interval is ~30 s
+with three retries; on BSD/pfSense it is approximately 90–120 s.  Each
+unresolvable cache entry generates a brief CPU spike on the router or
+firewall, producing the characteristic ~100% spikes at regular intervals
+that indicate multiple stale ARP entries — one spike per entry per probe
+cycle.
+
+[^garp]: **Gratuitous ARP.**  When a device boots or its IP configuration
+changes, it broadcasts an unsolicited ARP reply — a *gratuitous ARP* —
+announcing "I am IP x.x.x.x and my MAC is AA:BB:CC:DD:EE:FF."  Every
+device on the subnet that receives this immediately updates its ARP cache
+for that IP.  This is why rebooting end devices (servers, cameras, etc.)
+after a switch swap clears stale ARP entries faster than waiting for the
+natural cache-expiry cycle.
+
+---
 
 ## Synopsis
 
