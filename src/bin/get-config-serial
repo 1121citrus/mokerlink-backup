@@ -75,24 +75,30 @@ __get_config_raw__() {
             -translation binary -buffering full
         spawn -open $fd
 
-        # Send a carriage return to wake the console and wait for the login
-        # prompt.  The switch may be at any state (idle prompt or login screen);
-        # the two-level expect handles both.
-        log_user 0
-        send -- "\r"
-        expect {
-            "Username: " { }
-            "# "         {
-                # Already logged in from a previous session; log out first.
-                send -- "exit\r"
-                expect "Username: "
-            }
-            timeout {
-                # No prompt — try one more CR before giving up.
-                send -- "\r"
-                expect "Username: "
-            }
+    # Navigate to the login prompt regardless of current CLI state.
+    # Send 'exit' whenever any switch prompt ([>#]) is seen; stop on
+    # Username:.  exp_continue re-enters the expect block after each send
+    # so arbitrarily nested config modes are handled without enumeration.
+    log_user 0
+    send -- "\r"
+    set _tries 0
+    expect {
+        "Username: " { }
+        -re {[>#] } {
+            incr _tries
+            send -- "exit\r"
+            exp_continue
         }
+        timeout {
+            if { $_tries > 4 } {
+                puts stderr "ERROR: could not reach login prompt"
+                exit 1
+            }
+            incr _tries
+            send -- "\r"
+            exp_continue
+        }
+    }
 
         send -- "$username\r"
         expect "Password: "

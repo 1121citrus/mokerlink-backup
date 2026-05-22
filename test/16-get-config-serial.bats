@@ -89,9 +89,16 @@ setup() {
 
 # ── Login sequence ────────────────────────────────────────────────────────────
 
-@test "get-config-serial: handles already-logged-in console (sends exit)" {
-    grep -q '"# "' "${SCRIPT}"
-    grep -q '"exit\\\\r"' "${SCRIPT}" || grep -q 'send -- "exit\\r"' "${SCRIPT}"
+@test "get-config-serial: prolog uses exp_continue loop to reach login prompt" {
+    grep -q 'exp_continue' "${SCRIPT}"
+}
+
+@test "get-config-serial: prolog matches any prompt with [>#] regex" {
+    grep -q '\[>#\]' "${SCRIPT}"
+}
+
+@test "get-config-serial: prolog exits non-zero after too many retries" {
+    grep -q 'could not reach login prompt' "${SCRIPT}"
 }
 
 @test "get-config-serial: enable command sent when at user-exec prompt" {
