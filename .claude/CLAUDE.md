@@ -6,10 +6,10 @@ The switch CLI has three levels below the serial console:
 
 | Prompt | State | Exit command |
 |--------|-------|--------------|
-| `Username: ` | Login screen | (enter credentials) |
-| `switch> ` | User exec | `exit` → login prompt |
-| `switch# ` | Privileged exec | `exit` → user exec (`>`) |
-| `(config)# ` | Config mode | `end` → `#`, then `exit` × 2 |
+| `Username:` | Login screen | (enter credentials) |
+| `switch>` | User exec | `exit` → login prompt |
+| `switch#` | Privileged exec | `exit` → user exec (`>`) |
+| `(config)#` | Config mode | `end` → `#`, then `exit` × 2 |
 
 Key facts:
 - `exit` from `#` goes to `>` (user exec), **not** to the login prompt.
@@ -17,8 +17,11 @@ Key facts:
 - `enable` from `>` prompts for an **enable password**, which is separate
   from the login password.  Do not use `enable` in the serial prolog;
   navigate back to login and re-authenticate instead.
-- Use the `exp_continue` loop (see global CLAUDE.md) to reach the login
-  prompt from any state — do not enumerate states explicitly.
+- Use an `exp_continue` loop to reach the login prompt from any state
+  — do not enumerate states explicitly. Match any `[>#]` prompt, send
+  `exit`, and call `exp_continue` to re-enter the expect block; stop on
+  `"Username: "`. Bound with a `_tries` counter (limit 4) so the script
+  fails fast if the target never appears.
 
 ## Serial transport design
 
