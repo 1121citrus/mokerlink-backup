@@ -39,6 +39,7 @@ SSH+TFTP, and SSH command replay — covering both factory-reset switches
   - [Phase 5 — Verify](#phase-5--verify)
   - [Rollback](#rollback)
   - [Troubleshooting the swap](#troubleshooting-the-swap)
+    - [ARP flush did not restore connectivity](#arp-flush-did-not-restore-connectivity)
 - [Reference](#reference)
   - [mokerlink-backup CLI](#mokerlink-backup-cli)
   - [mokerlink-restore CLI](#mokerlink-restore-cli)
@@ -691,6 +692,139 @@ $ mokerlink-restore \
     --config start-config.cfg \
     --host <SWITCH-IP>
 ```
+
+#### ARP flush did not restore connectivity
+
+If the ARP flush in step 4.2 did not restore access to the switch or to
+devices behind it, there are three possible root causes:
+
+1. **The restore (Phase 2) did not take** — the switch rebooted with its
+   factory-default config and is sitting at `192.168.2.1`, not the
+   production management IP.
+2. **The switch has the right IP but the ARP entry on the firewall is
+   static** (not dynamic) — a static entry is not cleared by the
+   bulk flush.
+3. **The switch has the right IP but its VLAN or trunk configuration
+   did not come up correctly** — devices connected through the switch
+   are on a VLAN that is not carrying traffic.
+
+Work through these in order:
+
+##### Step 1 — check what IP the switch actually has (serial console)
+
+Connect the USB-to-serial adapter, open a terminal session, and run:
+
+```text
+show ip interface brief
+```
+
+or, if that returns nothing useful:
+
+```text
+show interface vlan 1
+show running-config
+```
+
+Look for the line that shows the management interface IP address.
+
+- **Shows `192.168.2.1`** — the restore did not take.  The switch came
+  back at factory default.  Proceed to [Re-run Phase 2](#re-run-phase-2).
+- **Shows the production IP** — the restore took.  The problem is
+  between the switch and the firewall.  Proceed to Step 2.
+
+##### Step 2 — direct-connect test
+
+Plug a laptop directly into any access port on the switch (not the
+uplink to the firewall).  Assign the laptop a static IP in the same
+subnet as the switch management IP — for example, if the switch
+management IP is `10.0.0.2`, set the laptop to `10.0.0.50 /
+255.255.255.0`.  Then:
+
+```console
+$ ping 10.0.0.2
+```
+
+- **Ping succeeds** — the switch itself is healthy.  The problem is
+  upstream of the switch (firewall ARP or VLAN trunk).  Proceed to
+  Step 3.
+- **Ping fails** — the switch has the right IP in its config but the
+  management interface is not up.  Run `show interface vlan 1` on the
+  serial console and look for `up/down` — the management VLAN may not
+  have a physical port assigned.  Compare the running config against the
+  backup to identify what is missing.
+
+##### Step 3 — inspect the firewall ARP table for a stale static entry
+
+In the pfSense web UI go to **Diagnostics → ARP Table**.  Find the row
+for the switch management IP.
+
+- **Row shows the old switch's MAC** — the bulk flush did not remove
+  this entry, or the entry was re-learned from stale traffic before the
+  new switch came up.  Delete the row directly from the UI (trash icon),
+  then from the pfSense shell:
+
+  ```console
+  # arp -d <SWITCH-IP>
+  # ping -c 3 <SWITCH-IP>
+  ```
+
+  The `ping` forces the firewall to send a fresh ARP request; the
+  replacement switch replies with its new MAC and the table is rebuilt.
+
+- **Row shows the new switch's MAC** — the firewall can reach the switch
+  at Layer 2.  If `ping` still fails from the firewall, there is a
+  routing or firewall rule issue, not an ARP problem.
+
+- **No row at all** — the firewall cannot see the switch at all.  Check
+  that the firewall's interface for the switch network is up
+  (**Interfaces → [interface name]**) and that the uplink cable between
+  the firewall and the switch is in the correct port on both ends.
+
+##### Step 4 — devices behind the switch still unreachable
+
+If the switch management IP is now reachable but devices on other
+subnets (for example, an application server at `10.10.0.10`) are still
+down, the VLAN trunk between the switch and the firewall is the most
+likely cause.
+
+On the serial console run:
+
+```text
+show interface <uplink-port>
+show vlan
+```
+
+Verify that:
+
+- The uplink port is in trunk mode and is carrying the expected VLANs.
+- Each VLAN that should carry traffic appears in the VLAN table with the
+  correct ports assigned.
+
+If the VLAN config looks correct but traffic still does not flow,
+reboot the switch once with the production config in place.  Some
+firmware versions do not fully apply trunk configuration until after a
+clean reboot from startup-config.
+
+##### Re-run Phase 2
+
+If the switch is at `192.168.2.1` (factory default), connect the laptop
+to the switch directly as described in
+[Phase 2 — Bootstrap the replacement switch](#phase-2--bootstrap-the-replacement-switch)
+and re-run the restore:
+
+```console
+$ sudo bash "$(pwd)/src/bin/mokerlink-restore" \
+      --transport serial \
+      --config start-config.cfg \
+      --tftp-host <laptop-ip-on-192.168.2.x>
+```
+
+Watch the output carefully during the `copy tftp://...` step.  If it
+prints an `Error` or times out before asking "Do you want to reboot
+now?", the TFTP transfer failed and the switch never received the file.
+Common cause: the laptop IP set in step 3 of Phase 2 hardware setup does
+not match the `--tftp-host` value, or the laptop firewall is blocking
+UDP port 69.
 
 ---
 
