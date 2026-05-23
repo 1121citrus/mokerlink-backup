@@ -101,6 +101,10 @@ setup() {
     grep -q 'could not reach login prompt' "${SCRIPT}"
 }
 
+@test "get-config-serial: login absorbs Authentication Failed and retries" {
+    grep -q 'Authentication Failed' "${SCRIPT}"
+}
+
 @test "get-config-serial: enable command sent when at user-exec prompt" {
     grep -q 'enable' "${SCRIPT}"
 }

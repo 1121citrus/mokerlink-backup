@@ -101,7 +101,21 @@ __get_config_raw__() {
     }
 
         send -- "$username\r"
-        expect "Password: "
+        # The idle screensaver may have passed the wake-up CR through to the
+        # login prompt as an empty username, generating "% Authentication
+        # Failed" before the real username arrives.  Absorb and re-send.
+        expect {
+            "Password: " { }
+            "Authentication Failed" {
+                expect "Username: "
+                send -- "$username\r"
+                expect "Password: "
+            }
+            timeout {
+                puts stderr "ERROR: no Password: prompt after sending username"
+                exit 1
+            }
+        }
         send -- "$password\r"
 
         # Wait for the privileged exec prompt (#).  The switch may show a
