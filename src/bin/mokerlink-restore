@@ -298,6 +298,7 @@ info "transport=${transport} host=${host} config=${config_file}"
 
 config_basename=$(basename "${config_file}")
 tftp_pid=
+crlf_dir=
 
 # Stop the TFTP server (if started) on any exit.
 cleanup() {
@@ -306,16 +307,25 @@ cleanup() {
         kill "${tftp_pid}" 2>/dev/null || true
         wait "${tftp_pid}" 2>/dev/null || true
     fi
+    [[ -n "${crlf_dir:-}" ]] && rm -rf "${crlf_dir}"
 }
 trap cleanup EXIT
 
 # Start a TFTP server in the background (serial and ssh transports).
 # Prints the PID to tftp_pid so cleanup() can stop it on exit.
+#
+# The switch firmware validates config files and requires CRLF line endings.
+# Captures from get-config-serial produce LF-only (expect normalises on
+# output).  Normalise to CRLF before serving so the firmware accepts the file.
 start_tftp() {
     local tftp_host="${1:?need TFTP host}"
+    crlf_dir=$(mktemp -d)
+    tr -d '\r' < "${config_file}" \
+        | awk '{ printf "%s\r\n", $0 }' \
+        > "${crlf_dir}/${config_basename}"
     info "starting TFTP server to serve ${config_basename}"
     bash "${bindir}/tftp-serve" \
-        --file "${config_file}" &
+        --file "${crlf_dir}/${config_basename}" &
     tftp_pid=$!
     # Give the server a moment to open the port before the switch connects.
     sleep 2
