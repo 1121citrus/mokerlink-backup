@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+
+# Push a config to a Mokerlink switch via serial console, replaying CLI commands.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   set-config-cmd-serial PORT COMMANDS_FILE
+#
+# DESCRIPTION
+#   Opens a serial console session (115200/8N1/no-flow) to the Mokerlink
+#   switch on PORT, logs in, and replays the interactive CLI commands from
+#   COMMANDS_FILE (produced by cfg-to-commands) one line at a time, waiting
+#   for the switch prompt after each command.
+#
+#   No TFTP server or elevated privileges are required.  This transport
+#   works in the factory-default state where SSH is disabled and the
+#   firmware's 'copy tftp://... startup-config' command rejects text-format
+#   configs produced by 'show' commands.
+#
+#   The command stream is expected to start with "configure terminal" and
+#   end with "end" then "save" (as produced by cfg-to-commands).  After
+#   the save, the script optionally issues "reboot".
+#
+# POSITIONAL ARGUMENTS
+#   PORT           Serial device path (e.g. /dev/cu.usbserial-0001)
+#   COMMANDS_FILE  File of CLI commands, one per line (produced by
+#                  cfg-to-commands; use /dev/stdin to pipe)
+#
+# ENVIRONMENT
+#   EXPECT_USERNAME  Login username (default: admin)
+#   EXPECT_PASSWORD  Login password (default: admin)
+#   EXPECT_REBOOT    'y' to reboot after save, 'n' to skip (default: n)
+#   EXPECT_TIMEOUT   Seconds to wait for each prompt (default: 30)
+#   DEBUG            Set to 'true' to enable expect -d tracing
+
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1090,SC1091
+source "${bindir}/../common-functions" 2>/dev/null \
+    || source /usr/local/include/bash/common-functions
+
+set -o errexit -o errtrace -o nounset -o pipefail
+is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+
+port="${1:?need serial port (e.g. /dev/cu.usbserial-0001)}"
+commands_file="${2:?need commands file path}"
+
+[[ -f "${commands_file}" ]] || \
+    error "commands file not found: '${commands_file}'"
+
+expect_args=()
+is_true "${DEBUG}" && expect_args+=(-d)
+
+# Read commands into env var so the Tcl script can iterate without filesystem
+# access inside the heredoc.  Newlines are preserved; Tcl splits on "\n".
+EXPECT_PORT="${port}" \
+EXPECT_COMMANDS="$(cat "${commands_file}")" \
+EXPECT_USERNAME="${EXPECT_USERNAME:-admin}" \
+EXPECT_PASSWORD="${EXPECT_PASSWORD:-admin}" \
+EXPECT_REBOOT="${EXPECT_REBOOT:-n}" \
+EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
+/usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
+    log_user 1
+    set match_max 1000000
+    set timeout     $env(EXPECT_TIMEOUT)
+    set port        $env(EXPECT_PORT)
+    set username    $env(EXPECT_USERNAME)
+    set password    $env(EXPECT_PASSWORD)
+    set do_reboot   $env(EXPECT_REBOOT)
+
+    # Open the serial port at 115200/8N1, no flow control.
+    # fconfigure -mode is valid only on a Tcl channel, not on an expect
+    # spawn ID, so configure the channel before passing it to spawn -open.
+    set fd [open $port r+]
+    fconfigure $fd -mode 115200,n,8,1 -handshake none \
+        -translation binary -buffering full
+    spawn -open $fd
+
+    # Navigate to the login prompt regardless of current CLI state.
+    # Send 'exit' whenever any switch prompt ([>#]) is seen; stop on
+    # Username:.  exp_continue re-enters the expect block after each send
+    # so arbitrarily nested config modes are handled without enumeration.
+    send -- "\r"
+    set _tries 0
+    expect {
+        "Username: " { }
+        -re {[>#] } {
+            incr _tries
+            send -- "exit\r"
+            exp_continue
+        }
+        timeout {
+            if { $_tries > 4 } {
+                puts stderr "ERROR: could not reach login prompt"
+                exit 1
+            }
+            incr _tries
+            send -- "\r"
+            exp_continue
+        }
+    }
+
+    send -- "$username\r"
+    # The idle screensaver may have passed the wake-up CR through to the
+    # login prompt as an empty username, generating "% Authentication
+    # Failed" before the real username arrives.  Absorb and re-send.
+    expect {
+        "Password: " { }
+        "Authentication Failed" {
+            expect "Username: "
+            send -- "$username\r"
+            expect "Password: "
+        }
+        timeout {
+            puts stderr "ERROR: no Password: prompt after sending username"
+            exit 1
+        }
+    }
+    send -- "$password\r"
+
+    # Wait for the privileged exec prompt (#).  The switch may show a
+    # user-exec prompt (>) first; send 'enable' if needed.
+    expect {
+        "# " { }
+        "> " {
+            send -- "enable\r"
+            expect "# "
+        }
+    }
+
+    # Disable the output pager so long responses are not interrupted.
+    send -- "terminal length 0\r"
+    expect "# "
+
+    # Replay each command line, waiting for the switch prompt after each.
+    # The pattern covers privileged (#) and config sub-mode prompts that
+    # end in ')#' (e.g. Switch(config-if)#).
+    set commands [split $env(EXPECT_COMMANDS) "\n"]
+    foreach cmd $commands {
+        if {[string trim $cmd] eq ""} { continue }
+        send -- "$cmd\r"
+        expect -re {[)#] $}
+    }
+
+    if { $do_reboot eq "y" } {
+        send -- "reboot\r"
+        catch { expect eof }
+    } else {
+        catch { send -- "exit\r" }
+        expect {
+            "> " { catch { send -- "exit\r" } }
+            eof  {}
+            timeout {}
+        }
+        catch { expect eof }
+    }
+__END_OF_SCRIPT__

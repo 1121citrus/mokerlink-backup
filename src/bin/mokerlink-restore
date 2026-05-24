@@ -89,10 +89,11 @@ Push a configuration file to a Mokerlink switch and reboot it.
 Options:
   -h,-?,--help           Display this help text
   -v,--version           Display command version
-  -t,--transport TRANS   Transport: serial, http, ssh, ssh-cmd (required)
+  -t,--transport TRANS   Transport: serial-cmd, serial, http, ssh, ssh-cmd
+                         (required)
   -c,--config FILE       Configuration file to push (required)
   -H,--host HOST         Switch IP or hostname (default: 192.168.2.1)
-     --port PORT         Serial device path (serial transport only;
+     --port PORT         Serial device path (serial/serial-cmd transports;
                          default: auto-detect)
      --tftp-host IP      Local IP the TFTP server binds to and the switch
                          pulls from (serial and ssh transports;
@@ -107,19 +108,24 @@ Options:
      --no-wait           Return immediately after triggering reboot
 
 Transports:
-  serial    Serial console (115200/8N1) + TFTP file transfer.
-            Requires a USB-to-serial adapter and sudo (TFTP port 69).
-            Works on factory-reset switches where SSH is disabled.
-  http      Web UI config upload over HTTP.
-            Requires only an Ethernet cable; no serial adapter needed.
-  ssh       SSH session + TFTP file transfer.
-            Requires SSH to be enabled (not the factory default).
-  ssh-cmd   SSH session with per-command config replay; no TFTP needed.
-            Requires SSH to be enabled (not the factory default).
+  serial-cmd  Serial console (115200/8N1) with per-command config replay.
+              No TFTP server required; no sudo needed.
+              Works on factory-reset switches where SSH is disabled and
+              the firmware rejects TFTP text-format configs.
+              Recommended for bootstrap and restore.
+  serial      Serial console (115200/8N1) + TFTP file transfer.
+              Requires sudo (TFTP port 69).  Use serial-cmd instead if
+              the firmware rejects text-format configs via TFTP.
+  http        Web UI config upload over HTTP.
+              Requires only an Ethernet cable; no serial adapter needed.
+  ssh         SSH session + TFTP file transfer.
+              Requires SSH to be enabled (not the factory default).
+  ssh-cmd     SSH session with per-command config replay; no TFTP needed.
+              Requires SSH to be enabled (not the factory default).
 
 Examples:
-  # Bootstrap a factory-reset switch over serial:
-  sudo mokerlink-restore --transport serial --config start-config.cfg
+  # Bootstrap a factory-reset switch over serial (recommended):
+  bash mokerlink-restore --transport serial-cmd --config start-config.cfg
 
   # Update a running switch over HTTP:
   mokerlink-restore --transport http --config start-config.cfg
@@ -234,9 +240,9 @@ done
     error "transport is required (--transport serial|http|ssh|ssh-cmd)"
 
 case "${transport}" in
-    serial|http|ssh|ssh-cmd) ;;
+    serial-cmd|serial|http|ssh|ssh-cmd) ;;
     *) error "unknown transport: '${transport}' \
-(expected: serial, http, ssh, or ssh-cmd)" ;;
+(expected: serial-cmd, serial, http, ssh, or ssh-cmd)" ;;
 esac
 
 [[ -n "${config_file}" ]] || \
@@ -257,7 +263,8 @@ if [[ "${transport}" == "ssh" || "${transport}" == "ssh-cmd" ]]; then
 fi
 
 # Serial transport: auto-detect port when --port not given.
-if [[ "${transport}" == "serial" && -z "${serial_port}" ]]; then
+if [[ "${transport}" == "serial" || "${transport}" == "serial-cmd" ]] \
+        && [[ -z "${serial_port}" ]]; then
     for _candidate in \
             /dev/cu.usbserial-* \
             /dev/ttyUSB0 \
@@ -274,7 +281,8 @@ if [[ "${transport}" == "serial" && -z "${serial_port}" ]]; then
 fi
 
 # Serial bootstrap: fall back to factory default password when none supplied.
-if [[ "${transport}" == "serial" && -z "${password}" ]]; then
+if [[ "${transport}" == "serial" || "${transport}" == "serial-cmd" ]] \
+        && [[ -z "${password}" ]]; then
     if [[ -r "${password_file}" ]]; then
         password=$(cat "${password_file}")
     else
@@ -286,7 +294,7 @@ fi
 # Apply transport-specific default for wait_for_restart.
 if [[ -z "${wait_for_restart}" ]]; then
     case "${transport}" in
-        serial|http) wait_for_restart=true ;;
+        serial-cmd|serial|http) wait_for_restart=true ;;
         ssh|ssh-cmd) wait_for_restart=false ;;
     esac
 fi
@@ -332,6 +340,25 @@ start_tftp() {
 }
 
 case "${transport}" in
+    serial-cmd)
+        # Parse the config file into an interactive CLI command stream,
+        # write it to a temp file, then drive set-config-cmd-serial.
+        # No TFTP server required; no sudo needed.
+        commands_file=$(mktemp)
+        trap 'rm -f "${commands_file}"' EXIT
+        bash "${bindir}/cfg-to-commands" "${config_file}" \
+            > "${commands_file}"
+
+        is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
+
+        info "starting serial command-stream restore on ${serial_port}"
+        EXPECT_USERNAME="${user}" \
+        EXPECT_PASSWORD="${password}" \
+        EXPECT_REBOOT="${_reboot_flag}" \
+            bash "${bindir}/set-config-cmd-serial" \
+                "${serial_port}" \
+                "${commands_file}"
+        ;;
     serial)
         # Determine the bootstrap host IP on the directly-connected interface.
         # The switch is at 192.168.2.1; the host must be in 192.168.2.x/24.

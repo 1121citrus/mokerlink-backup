@@ -63,6 +63,14 @@ setup() {
         > "${BIN_DIR}/set-config-cmd"
     chmod +x "${BIN_DIR}/set-config-cmd"
 
+    # set-config-cmd-serial stub.
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'printf "stub set-config-cmd-serial: %s\n" "$*" >&2' \
+        'exit 0' \
+        > "${BIN_DIR}/set-config-cmd-serial"
+    chmod +x "${BIN_DIR}/set-config-cmd-serial"
+
     # tftp-serve stub: exits 0 immediately (no server needed in unit tests).
     printf '%s\n' \
         '#!/usr/bin/env bash' \
@@ -281,4 +289,40 @@ teardown() {
         --tftp-host 127.0.0.1 \
         --no-wait
     [ "$status" -eq 0 ]
+}
+
+# ── serial-cmd transport ──────────────────────────────────────────────────────
+
+@test "mokerlink-restore: --transport serial-cmd does not require password" {
+    run env MOKERLINK_PASSWORD= \
+        MOKERLINK_PASSWORD_FILE="${TEST_TMPDIR}/nonexistent-pw" \
+        bash "${BIN_DIR}/mokerlink-restore" \
+        --transport serial-cmd \
+        --config "${CFG}" \
+        --port "${FAKE_PORT}" \
+        --no-wait
+    [ "$status" -eq 0 ]
+}
+
+@test "mokerlink-restore: --transport serial-cmd exits non-zero when no port found" {
+    for _c in /dev/cu.usbserial-* /dev/ttyUSB0 /dev/ttyACM0; do
+        [[ -c "${_c}" ]] && skip "real serial port present; skipping"
+    done
+    run env MOKERLINK_PASSWORD= \
+        MOKERLINK_PASSWORD_FILE="${TEST_TMPDIR}/nonexistent-pw" \
+        bash "${BIN_DIR}/mokerlink-restore" \
+        --transport serial-cmd \
+        --config "${CFG}"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"no serial port found"* ]]
+}
+
+@test "mokerlink-restore: --transport serial-cmd invokes set-config-cmd-serial" {
+    run bash "${BIN_DIR}/mokerlink-restore" \
+        --transport serial-cmd \
+        --config "${CFG}" \
+        --port "${FAKE_PORT}" \
+        --no-wait
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"stub set-config-cmd-serial"* ]]
 }
