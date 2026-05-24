@@ -136,16 +136,27 @@ EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
     expect "# "
 
     # Replay each command line, waiting for the switch prompt after each.
-    # The pattern covers privileged (#) and config sub-mode prompts that
-    # end in ')#' (e.g. Switch(config-if)#).
+    # Pattern covers privileged (#), user-exec (>), and config sub-mode
+    # prompts ending in ')#' (e.g. Switch(config-if)#).  Including '>' here
+    # prevents a 30-second timeout hang on every remaining command after an
+    # accidental 'exit' drops from # to >.
     set commands [split $env(EXPECT_COMMANDS) "\n"]
     foreach cmd $commands {
         if {[string trim $cmd] eq ""} { continue }
         send -- "$cmd\r"
-        expect -re {[)#] $}
+        expect -re {[)>#] $}
     }
 
+    # Re-enter privileged exec before rebooting in case the command stream
+    # left the switch at the user-exec prompt (>).
     if { $do_reboot eq "y" } {
+        expect {
+            "# " { }
+            "> " {
+                send -- "enable\r"
+                expect "# "
+            }
+        }
         send -- "reboot\r"
         catch { expect eof }
     } else {
