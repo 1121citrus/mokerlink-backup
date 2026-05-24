@@ -122,8 +122,10 @@ awk '
 
 BEGIN {
     in_block = 0
-    # Emit the configure terminal preamble.
-    print "configure terminal"
+    # Mokerlink CLI uses "configure" (not "configure terminal") to enter
+    # global config mode.  The paired "end" in the END block returns to
+    # privileged exec, where "save" is a valid command.
+    print "configure"
 }
 
 END {

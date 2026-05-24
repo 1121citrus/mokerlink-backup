@@ -74,13 +74,13 @@ EOF
 
 # ── Preamble and postamble ─────────────────────────────────────────────────────
 
-@test "cfg-to-commands: first output line is configure terminal" {
+@test "cfg-to-commands: first output line is configure" {
     output=$(run_cfg <<'EOF'
 system name "test"
 EOF
 )
     first=$(echo "${output}" | head -1)
-    [ "${first}" = "configure terminal" ]
+    [ "${first}" = "configure" ]
 }
 
 @test "cfg-to-commands: last two output lines are end then save" {
@@ -200,9 +200,9 @@ EOF
     [ "$status" -eq 0 ]
 }
 
-@test "cfg-to-commands: start-config produces configure terminal preamble" {
+@test "cfg-to-commands: start-config produces configure preamble" {
     output=$(bash "${SCRIPT}" "${REPO_ROOT}/switch-1-start-config.cfg" 2>/dev/null)
-    [ "$(echo "${output}" | head -1)" = "configure terminal" ]
+    [ "$(echo "${output}" | head -1)" = "configure" ]
 }
 
 @test "cfg-to-commands: start-config produces 28 interface blocks" {
