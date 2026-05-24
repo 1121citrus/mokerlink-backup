@@ -920,10 +920,10 @@ Options:
 | Host | `-H`, `--host` | `MOKERLINK_HOST` | `${TAILSCALE_HOST}` |
 | Serial port | `--port` | — | auto-detect |
 | User | `-u`, `--user` | `MOKERLINK_USER` | `remote-backup` |
-| Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | _none_ |
+| Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | *none* |
 | Password file | `-P`, `--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` |
 | Format | `-f`, `--format` | `MOKERLINK_FORMAT` | `tar` |
-| Tailscale host | — | `TAILSCALE_HOST` | _none_ |
+| Tailscale host | — | `TAILSCALE_HOST` | *none* |
 | Debug | — | `DEBUG` | `false` |
 
 `MOKERLINK_HOST` takes precedence over `TAILSCALE_HOST`.  Set `DEBUG=true`
@@ -940,10 +940,11 @@ Push a configuration file to a Mokerlink switch and reboot it.
 Options:
   -h,-?,--help           Display this help text
   -v,--version           Display command version
-  -t,--transport TRANS   Transport: serial, http, ssh, ssh-cmd (required)
+  -t,--transport TRANS   Transport: serial-cmd, serial, http, ssh, ssh-cmd
+                         (required)
   -c,--config FILE       Configuration file to push (required)
   -H,--host HOST         Switch IP or hostname (default: 192.168.2.1)
-     --port PORT         Serial device path (serial transport only;
+     --port PORT         Serial device path (serial/serial-cmd transports;
                          default: auto-detect)
      --tftp-host IP      Local IP the TFTP server binds to and the switch
                          pulls from (serial and ssh transports;
@@ -960,8 +961,8 @@ Options:
 
 | Parameter | Option | Environment variable | Default |
 |---|---|---|---|
-| Transport | `-t`, `--transport` | — | _(required)_ |
-| Config file | `-c`, `--config` | — | _(required)_ |
+| Transport | `-t`, `--transport` | — | *(required)* |
+| Config file | `-c`, `--config` | — | *(required)* |
 | Host | `-H`, `--host` | `MOKERLINK_HOST` | `192.168.2.1` |
 | Serial port | `--port` | — | auto-detect |
 | TFTP host | `--tftp-host` | `TFTP_HOST` | auto-detect |
@@ -981,11 +982,11 @@ as a Docker Compose service.
 |---|---|---|
 | `AWS_CONFIG_FILE` | `/run/secrets/aws-config` | AWS credentials file (Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/)) |
 | `AWS_DRYRUN` | `false` | Set to `true` to pass `--dryrun` to AWS CLI commands |
-| `AWS_S3_BUCKET_NAME` | _(required)_ | S3 bucket for uploads; may include a path prefix, e.g. `your-bucket/backups/daily` |
+| `AWS_S3_BUCKET_NAME` | *(required)* | S3 bucket for uploads; may include a path prefix, e.g. `your-bucket/backups/daily` |
 | `COMPRESSION` | `none` | Algorithm: `bzip2`, `gz`, `gzip`, `lzma`, `lzo`, `none`, `xz`, `zip`, and others |
 | `CRON_EXPRESSION` | `@daily` | Standard cron expression — see [crontab.guru](https://crontab.guru/) |
 | `GPG_CIPHER_ALGO` | `aes256` | GnuPG symmetric cipher |
-| `GPG_PASSPHRASE` | _none_ | GnuPG passphrase; prefer `GPG_PASSPHRASE_FILE` |
+| `GPG_PASSPHRASE` | *none* | GnuPG passphrase; prefer `GPG_PASSPHRASE_FILE` |
 | `GPG_PASSPHRASE_FILE` | `/run/secrets/gpg-passphrase` | File containing the passphrase (Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/)) |
 | `TZ` | `UTC` | Timezone for cron scheduling, e.g. `America/New_York` |
 

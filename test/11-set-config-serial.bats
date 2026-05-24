@@ -69,7 +69,8 @@ setup() {
 
 @test "set-config-serial: handles pre-logged-in console (sends exit)" {
     grep -q '"# "' "${SCRIPT}"
-    grep -q 'Already logged in' "${SCRIPT}"
+    grep -qE '\[>#\]' "${SCRIPT}"
+    grep -q 'exp_continue' "${SCRIPT}"
 }
 
 @test "set-config-serial: handles user-exec prompt with enable command" {

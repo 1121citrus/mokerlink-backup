@@ -220,12 +220,11 @@ teardown() {
 }
 
 @test "mokerlink-backup: serial transport tar format produces a tar archive" {
-    run bash "${BIN_DIR}/mokerlink-backup" \
+    local out_file="${TEST_TMPDIR}/backup.tar"
+    bash "${BIN_DIR}/mokerlink-backup" \
         --transport serial \
         --port "${FAKE_PORT}" \
         --running \
-        --format tar
-    [ "$status" -eq 0 ]
-    # stdout should be a valid tar archive
-    printf '%s' "$output" | tar -tf - > /dev/null
+        --format tar > "${out_file}"
+    tar -tf "${out_file}" > /dev/null
 }

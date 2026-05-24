@@ -196,26 +196,26 @@ EOF
 # ── Full config roundtrip ─────────────────────────────────────────────────────
 
 @test "cfg-to-commands: processes start-config.cfg without error" {
-    run bash "${SCRIPT}" "${REPO_ROOT}/start-config.cfg"
+    run bash "${SCRIPT}" "${REPO_ROOT}/switch-1-start-config.cfg"
     [ "$status" -eq 0 ]
 }
 
 @test "cfg-to-commands: start-config produces configure terminal preamble" {
-    output=$(bash "${SCRIPT}" "${REPO_ROOT}/start-config.cfg" 2>/dev/null)
+    output=$(bash "${SCRIPT}" "${REPO_ROOT}/switch-1-start-config.cfg" 2>/dev/null)
     [ "$(echo "${output}" | head -1)" = "configure terminal" ]
 }
 
 @test "cfg-to-commands: start-config produces 28 interface blocks" {
-    output=$(bash "${SCRIPT}" "${REPO_ROOT}/start-config.cfg" 2>/dev/null)
+    output=$(bash "${SCRIPT}" "${REPO_ROOT}/switch-1-start-config.cfg" 2>/dev/null)
     local count
     count=$(echo "${output}" | grep -c '^interface GE')
     [ "${count}" -eq 28 ]
 }
 
 @test "cfg-to-commands: start-config produces correct exit count" {
-    output=$(bash "${SCRIPT}" "${REPO_ROOT}/start-config.cfg" 2>/dev/null)
-    # 9 vlans + 1 spanning-tree + 28 interfaces = 38 exits.
+    output=$(bash "${SCRIPT}" "${REPO_ROOT}/switch-1-start-config.cfg" 2>/dev/null)
+    # 10 vlans + 1 spanning-tree + 28 interfaces = 39 exits.
     local count
     count=$(echo "${output}" | grep -c '^exit$')
-    [ "${count}" -eq 38 ]
+    [ "${count}" -eq 39 ]
 }
