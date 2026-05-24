@@ -11,9 +11,10 @@ Backup runs as a one-shot CLI command or on a recurring schedule using a
 built-in cron service.
 
 **Restore** pushes a saved configuration file back to a switch and reboots
-it.  Four transport mechanisms are available — serial console, HTTP web UI,
-SSH+TFTP, and SSH command replay — covering both factory-reset switches
-(where SSH is not yet enabled) and fully running switches.
+it.  Five transport mechanisms are available — serial command replay,
+serial+TFTP, HTTP web UI, SSH+TFTP, and SSH command replay — covering
+both factory-reset switches (where SSH is not yet enabled) and fully
+running switches.
 
 ## Contents
 
@@ -319,13 +320,21 @@ the state of the switch and the hardware available.
 
 | Transport | Switch state | Cable required | TFTP server | `sudo` |
 |---|---|---|---|---|
+| `serial-cmd` | Any, including factory reset | USB-to-serial + console cable | No | No |
 | `ssh-cmd` | Running (SSH enabled) | Ethernet only | No | No |
-| `ssh` | Running (SSH enabled) | Ethernet only | Yes (auto-started) | Yes (port 69) |
 | `serial` | Any, including factory reset | USB-to-serial + console cable | Yes (auto-started) | Yes (port 69) |
+| `ssh` | Running (SSH enabled) | Ethernet only | Yes (auto-started) | Yes (port 69) |
 | `http` | Factory reset or running | Ethernet only | No | No |
 
+> **`serial-cmd` transport (recommended for bootstrap):** Replays the
+> config as interactive CLI commands over the serial console.  No TFTP
+> server or elevated privileges required.  Works on factory-reset switches
+> where SSH is disabled and the firmware's `copy tftp://...` command
+> rejects text-format config files.
+>
 > **`http` transport:** Not yet implemented in the current release.
-> Use `serial` for factory-reset switches or `ssh-cmd` for running switches.
+> Use `serial-cmd` for factory-reset switches or `ssh-cmd` for running
+> switches.
 
 Both SSH transports use legacy RSA key exchange flags (`+ssh-rsa`) because
 the Mokerlink firmware does not support modern key exchange algorithms.  The
@@ -369,19 +378,71 @@ $ sudo docker run --rm \
 
 ### Restore a factory-reset switch
 
-The serial console transport works on any switch regardless of whether SSH
-or the web UI is reachable.  It requires a USB-to-serial adapter, the RJ45
-console cable shipped with the switch, and `sudo` access on the laptop.
+The `serial-cmd` and `serial` transports both work on any switch regardless
+of whether SSH or the web UI is reachable.  Both require a USB-to-serial
+adapter and the RJ45 console cable shipped with the switch.  Choose based
+on what hardware and privileges are available:
+
+- **`serial-cmd` (recommended)** — replays the config as interactive CLI
+  commands.  No TFTP server or `sudo` required.  Serial cable only.
+- **`serial`** — transfers the config via TFTP.  Requires `sudo` (TFTP
+  port 69) and a direct Ethernet connection in the `192.168.2.0/24` range.
 
 > **macOS vs Linux:** Docker Desktop on macOS runs inside a Linux VM.
-> USB serial devices (`/dev/cu.usbserial-*`) and direct network-interface
-> binds are not available inside the VM, so the serial transport must run
-> natively from the repository checkout.  On Linux, Docker has full access
-> to host devices and networking.
+> USB serial devices (`/dev/cu.usbserial-*`) are not available inside the
+> VM.  Both serial transports must run natively from the repository
+> checkout on macOS.  On Linux, Docker with `--device` works for both.
 
 ---
 
-#### macOS — native (no Docker)
+#### serial-cmd — macOS (native, no Docker)
+
+**Hardware:** Connect the USB-to-serial adapter to the switch's RJ45 console
+port.  No Ethernet connection is required for the restore itself.
+
+**Restore command** — run from the repository root:
+
+```console
+$ bash "$(pwd)/src/bin/mokerlink-restore" \
+      --transport serial-cmd \
+      --config start-config.cfg
+```
+
+- The serial port is auto-detected (`/dev/cu.usbserial-*`).
+  Use `--port /dev/cu.usbserial-XXXX` to override.
+- The factory-default password (`admin`) is used automatically.
+  Add `--password YOUR_PASS` if the switch already has a custom password.
+- After pushing the config, the script reboots the switch and waits for
+  it to respond on port 80 (default).  Pass `--no-wait` to return
+  immediately without waiting.
+
+---
+
+#### serial-cmd — Linux (Docker)
+
+```console
+$ docker run --rm \
+      --device /dev/ttyUSB0 \
+      --volume "$(pwd):/work" --workdir /work \
+      1121citrus/mokerlink-backup:latest \
+      mokerlink-restore \
+          --transport serial-cmd \
+          --config start-config.cfg \
+          --port /dev/ttyUSB0
+```
+
+- Replace `/dev/ttyUSB0` with the actual serial device
+  (`ls /dev/ttyUSB* /dev/ttyACM*`).
+- To supply a custom password, add:
+  `--volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro"`
+
+---
+
+#### serial — macOS (native, no Docker)
+
+Use `serial` when `serial-cmd` is unavailable or a TFTP-based transfer
+is preferred.  Requires `sudo` and a direct Ethernet connection to the
+switch.
 
 **Hardware setup:**
 
@@ -416,7 +477,7 @@ pushes the config, and reboots the switch.  Total time: about two minutes.
 
 ---
 
-#### Linux — Docker
+#### serial — Linux (Docker)
 
 **Hardware setup:** same steps 1–4 as macOS above.
 
@@ -525,18 +586,16 @@ Save the updated config file before proceeding.
 
 ### Phase 2 — Bootstrap the replacement switch
 
-Follow the [serial console procedure](#macos--native-no-docker)
+Follow the [serial-cmd procedure](#serial-cmd--macos-native-no-docker)
 using the replacement switch and the config file updated in Phase 1.
 
 Summary of what that procedure does:
 
 1. Connect the USB-to-serial adapter to the replacement switch's console port.
-2. Connect a direct Ethernet cable between the laptop and any switch port;
-   set the laptop's interface to a static address in `192.168.2.0/24`
-   (e.g., `192.168.2.10`).
-3. Run `mokerlink-restore --transport serial --config start-config.cfg
-   --tftp-host 192.168.2.10` to push the config and reboot the switch.
-4. Remove the bootstrap cabling (serial adapter and direct Ethernet).
+2. Run `bash "$(pwd)/src/bin/mokerlink-restore" --transport serial-cmd
+   --config start-config.cfg --no-wait` to push the config and reboot
+   the switch.
+3. Remove the serial adapter.
 
 At the end of Phase 2, the replacement switch holds the production
 configuration.  The original switch is still running with all production
@@ -807,24 +866,22 @@ clean reboot from startup-config.
 
 ##### Re-run Phase 2
 
-If the switch is at `192.168.2.1` (factory default), connect the laptop
-to the switch directly as described in
-[Phase 2 — Bootstrap the replacement switch](#phase-2--bootstrap-the-replacement-switch)
-and re-run the restore:
+If the switch is at `192.168.2.1` (factory default), re-run the restore
+from the repository root:
 
 ```console
-$ sudo bash "$(pwd)/src/bin/mokerlink-restore" \
-      --transport serial \
+$ bash "$(pwd)/src/bin/mokerlink-restore" \
+      --transport serial-cmd \
       --config start-config.cfg \
-      --tftp-host <laptop-ip-on-192.168.2.x>
+      --no-wait
 ```
 
-Watch the output carefully during the `copy tftp://...` step.  If it
-prints an `Error` or times out before asking "Do you want to reboot
-now?", the TFTP transfer failed and the switch never received the file.
-Common cause: the laptop IP set in step 3 of Phase 2 hardware setup does
-not match the `--tftp-host` value, or the laptop firewall is blocking
-UDP port 69.
+No Ethernet connection is required — the command runs entirely over the
+serial console.  Watch the output during the command-replay phase; each
+config command is printed as it is sent.  If the script hangs after a
+particular command, the switch may have rejected that line or entered an
+unexpected prompt.  Press Ctrl+C after the timeout expires (~30 s) and
+check which command was last sent in the output.
 
 ---
 
@@ -970,8 +1027,8 @@ Options:
 | Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | `admin` (serial only) |
 | Password file | `-P`, `--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` |
 
-`--wait` / `--no-wait` default by transport: serial and http default to
-`--wait`; ssh and ssh-cmd default to `--no-wait`.
+`--wait` / `--no-wait` default by transport: `serial-cmd`, `serial`, and
+`http` default to `--wait`; `ssh` and `ssh-cmd` default to `--no-wait`.
 
 ### Scheduled backup parameters
 
