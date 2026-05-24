@@ -11,10 +11,10 @@ Backup runs as a one-shot CLI command or on a recurring schedule using a
 built-in cron service.
 
 **Restore** pushes a saved configuration file back to a switch and reboots
-it.  Five transport mechanisms are available — serial command replay,
-serial+TFTP, HTTP web UI, SSH+TFTP, and SSH command replay — covering
-both factory-reset switches (where SSH is not yet enabled) and fully
-running switches.
+it.  Four transport mechanisms are available — serial command replay,
+serial+TFTP, SSH+TFTP, and SSH command replay — covering both
+factory-reset switches (where SSH is not yet enabled) and fully running
+switches.
 
 ## Contents
 
@@ -75,8 +75,8 @@ mokerlink-backup() {
         mokerlink-backup "$@"
 }
 
-# Restore switch configuration — http and ssh-cmd transports only.
-# Serial and ssh transports require host networking and sudo; see the
+# Restore switch configuration — ssh-cmd transport only.
+# Serial and ssh transports require host networking or sudo; see the
 # "Restore a factory-reset switch" section for those invocations.
 mokerlink-restore() {
     docker run --rm \
@@ -324,17 +324,12 @@ the state of the switch and the hardware available.
 | `ssh-cmd` | Running (SSH enabled) | Ethernet only | No | No |
 | `serial` | Any, including factory reset | USB-to-serial + console cable | Yes (auto-started) | Yes (port 69) |
 | `ssh` | Running (SSH enabled) | Ethernet only | Yes (auto-started) | Yes (port 69) |
-| `http` | Factory reset or running | Ethernet only | No | No |
 
 > **`serial-cmd` transport (recommended for bootstrap):** Replays the
 > config as interactive CLI commands over the serial console.  No TFTP
 > server or elevated privileges required.  Works on factory-reset switches
 > where SSH is disabled and the firmware's `copy tftp://...` command
 > rejects text-format config files.
->
-> **`http` transport:** Not yet implemented in the current release.
-> Use `serial-cmd` for factory-reset switches or `ssh-cmd` for running
-> switches.
 
 Both SSH transports use legacy RSA key exchange flags (`+ssh-rsa`) because
 the Mokerlink firmware does not support modern key exchange algorithms.  The
@@ -997,7 +992,7 @@ Push a configuration file to a Mokerlink switch and reboot it.
 Options:
   -h,-?,--help           Display this help text
   -v,--version           Display command version
-  -t,--transport TRANS   Transport: serial-cmd, serial, http, ssh, ssh-cmd
+  -t,--transport TRANS   Transport: serial-cmd, serial, ssh, ssh-cmd
                          (required)
   -c,--config FILE       Configuration file to push (required)
   -H,--host HOST         Switch IP or hostname (default: 192.168.2.1)
@@ -1027,8 +1022,8 @@ Options:
 | Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | `admin` (serial only) |
 | Password file | `-P`, `--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` |
 
-`--wait` / `--no-wait` default by transport: `serial-cmd`, `serial`, and
-`http` default to `--wait`; `ssh` and `ssh-cmd` default to `--no-wait`.
+`--wait` / `--no-wait` default by transport: `serial-cmd` and `serial`
+default to `--wait`; `ssh` and `ssh-cmd` default to `--no-wait`.
 
 ### Scheduled backup parameters
 
