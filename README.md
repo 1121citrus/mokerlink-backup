@@ -395,6 +395,14 @@ on what hardware and privileges are available:
 **Hardware:** Connect the USB-to-serial adapter to the switch's RJ45 console
 port.  No Ethernet connection is required for the restore itself.
 
+> **Note — Ethernet cable during bootstrap:** If you have an Ethernet cable
+> plugged from your laptop into one of the switch ports while the config is
+> being applied, make sure that port stays in VLAN 1 (the default) after the
+> restore.  Once the restored config assigns the port to a different VLAN,
+> `http://192.168.2.1` will stop responding from that cable.  Either use a
+> port whose config entry leaves it in VLAN 1, or have the router ready so
+> the switch can come up fully without any further manual steps on port 80.
+
 **Restore command** — run from the repository root:
 
 ```console
