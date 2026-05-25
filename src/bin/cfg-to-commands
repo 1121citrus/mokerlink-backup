@@ -101,6 +101,11 @@ awk '
 # separately with the plaintext password.
 /^username / { next }
 
+# Translate stored GigabitEthernet port names to CLI form.
+# show running-config writes "interface GEn"; the CLI interface command
+# requires "gin" (gi prefix for GigabitEthernet).
+/^interface GE[0-9]/ { sub(/^interface GE/, "interface gi") }
+
 # Indented line (one leading space) = sub-mode command inside a block.
 /^ / {
     sub(/^ /, "")

@@ -72,8 +72,7 @@ EOF
     [ "${line_count}" -eq 2 ]
 }
 
-@test "cfg-to-commands: skips username lines" {
-    output=$(run_cfg <<'EOF'
+@test "cfg-to-commands: skips username lines" {    output=$(run_cfg <<'EOF'
 username "admin" secret encrypted MjEyMzJmMjk3YTU3YTVhNzQzODk0YTBlNGE4MDFmYzM=
 username "" privilege user secret encrypted dGVzdA==
 system name "test"
@@ -81,6 +80,21 @@ EOF
 )
     echo "${output}" | grep -qv '^username'
     echo "${output}" | grep -q 'system name'
+}
+
+@test "cfg-to-commands: translates GEn port names to gin" {
+    output=$(run_cfg <<'EOF'
+interface GE1
+ description "test"
+!
+interface GE28
+ description "uplink"
+!
+EOF
+)
+    echo "${output}" | grep -q '^interface gi1$'
+    echo "${output}" | grep -q '^interface gi28$'
+    ! echo "${output}" | grep -q '^interface GE'
 }
 
 # ── Preamble and postamble ─────────────────────────────────────────────────────
@@ -177,7 +191,7 @@ interface GE1
 !
 EOF
 )
-    [[ "${output}" == *"interface GE1"* ]]
+    [[ "${output}" == *"interface gi1"* ]]
     [[ "${output}" == *"description"* ]]
     [[ "${output}" == *"exit"* ]]
 }
@@ -219,7 +233,7 @@ EOF
 @test "cfg-to-commands: start-config produces 28 interface blocks" {
     output=$(bash "${SCRIPT}" "${REPO_ROOT}/switch-1-start-config.cfg" 2>/dev/null)
     local count
-    count=$(echo "${output}" | grep -c '^interface GE')
+    count=$(echo "${output}" | grep -c '^interface gi')
     [ "${count}" -eq 28 ]
 }
 
