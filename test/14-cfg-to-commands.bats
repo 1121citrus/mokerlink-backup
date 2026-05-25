@@ -72,6 +72,17 @@ EOF
     [ "${line_count}" -eq 2 ]
 }
 
+@test "cfg-to-commands: skips username lines" {
+    output=$(run_cfg <<'EOF'
+username "admin" secret encrypted MjEyMzJmMjk3YTU3YTVhNzQzODk0YTBlNGE4MDFmYzM=
+username "" privilege user secret encrypted dGVzdA==
+system name "test"
+EOF
+)
+    echo "${output}" | grep -qv '^username'
+    echo "${output}" | grep -q 'system name'
+}
+
 # ── Preamble and postamble ─────────────────────────────────────────────────────
 
 @test "cfg-to-commands: first output line is configure" {

@@ -94,6 +94,13 @@ awk '
 /^!/ && length($0) > 1 { next }
 /^[[:space:]]*$/ { next }
 
+# Skip username lines.  The config file stores passwords as
+# "secret encrypted BASE64HASH" — a stored form that the CLI rejects;
+# it prompts for the old password interactively, which cannot be
+# satisfied from a config replay.  Password restoration must be done
+# separately with the plaintext password.
+/^username / { next }
+
 # Indented line (one leading space) = sub-mode command inside a block.
 /^ / {
     sub(/^ /, "")
