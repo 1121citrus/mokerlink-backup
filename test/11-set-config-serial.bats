@@ -89,8 +89,8 @@ setup() {
 
 @test "set-config-cmd-serial: log_user is always 0 (no raw interaction output)" {
     grep -q 'log_user 0' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
-    run ! grep -q 'log_user 1' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
-    [ "$status" -eq 0 ]
+    run grep -q 'log_user 1' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
+    [ "$status" -ne 0 ]
 }
 
 @test "set-config-cmd-serial: uses emit_log proc for structured output" {
@@ -114,7 +114,7 @@ setup() {
     local script="${REPO_ROOT}/src/bin/set-config-cmd-serial"
     # After the reboot guard, the next send must be 'reboot', not an expect.
     grep -q 'do_reboot eq "y"' "${script}"
-    grep -q 'send -- "reboot\\\\r"' "${script}"
+    grep -q 'send -- "reboot\\r"' "${script}"
 }
 
 @test "set-config-cmd-serial: section detection tracks in_block to avoid false transitions" {
