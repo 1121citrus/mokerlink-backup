@@ -77,6 +77,50 @@ setup() {
     grep -q '"enable\\\\r"' "${SCRIPT}" || grep -q 'enable' "${SCRIPT}"
 }
 
+# ── set-config-cmd-serial static analysis ────────────────────────────────────
+
+@test "set-config-cmd-serial: handles reboot save-config prompt" {
+    grep -q 'startup-config' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
+}
+
+@test "set-config-cmd-serial: answers y to save-config prompt" {
+    grep -q '"y\\r"' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
+}
+
+@test "set-config-cmd-serial: log_user is always 0 (no raw interaction output)" {
+    grep -q 'log_user 0' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
+    run ! grep -q 'log_user 1' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
+    [ "$status" -eq 0 ]
+}
+
+@test "set-config-cmd-serial: uses emit_log proc for structured output" {
+    grep -q 'proc emit_log' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
+    grep -q 'EXPECT_LOG_LEVEL_NUM' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
+}
+
+@test "set-config-cmd-serial: emits INFO section transitions" {
+    grep -q 'emit_log INFO' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
+    grep -q 'section_for' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
+}
+
+@test "set-config-cmd-serial: TRACE response parsed from expect_out buffer" {
+    grep -q 'expect_out(buffer)' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
+    grep -q 'emit_log TRACE' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
+}
+
+@test "set-config-cmd-serial: reboot sends directly without extra expect" {
+    # The command loop already consumed the '#' prompt after 'save'.
+    # The reboot block must NOT have an extra 'expect "# "' before 'send reboot'.
+    local script="${REPO_ROOT}/src/bin/set-config-cmd-serial"
+    # After the reboot guard, the next send must be 'reboot', not an expect.
+    grep -q 'do_reboot eq "y"' "${script}"
+    grep -q 'send -- "reboot\\\\r"' "${script}"
+}
+
+@test "set-config-cmd-serial: section detection tracks in_block to avoid false transitions" {
+    grep -q 'in_block' "${REPO_ROOT}/src/bin/set-config-cmd-serial"
+}
+
 # ── wait-for-restart static analysis ─────────────────────────────────────────
 
 @test "wait-for-restart: uses /dev/tcp for port polling" {

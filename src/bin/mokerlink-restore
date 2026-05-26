@@ -33,6 +33,9 @@
 #   -P,--password-file FILE
 #                          Password file (env: MOKERLINK_PASSWORD_FILE;
 #                          default: /run/secrets/mokerlink-password)
+#   -l,--log-level LEVEL   Log verbosity: trace|debug|info|warn|error
+#                          (env: LOG_LEVEL; default: info)
+#      --dry-run           Show what would be done without executing
 #      --no-reboot         Push config but do not reboot the switch
 #      --wait              Wait for switch to respond after reboot
 #                          (default: on for serial and http transports)
@@ -45,7 +48,8 @@
 #                          Path to password file
 #                          (default: /run/secrets/mokerlink-password)
 #   TFTP_HOST              Local IP for TFTP (overridden by --tftp-host)
-#   DEBUG                  Enable debug tracing (default: false)
+#   LOG_LEVEL              Log verbosity level (default: info)
+#   DEBUG                  Enable bash trace output (default: false)
 #   ENV                    Env-file path (default: ~/.env)
 #
 # EXAMPLES
@@ -103,6 +107,9 @@ Options:
   -P,--password-file FILE
                          Password file (env: MOKERLINK_PASSWORD_FILE;
                          default: /run/secrets/mokerlink-password)
+  -l,--log-level LEVEL   Log verbosity: trace|debug|info|warn|error
+                         (env: LOG_LEVEL; default: info)
+     --dry-run           Show what would be done without connecting
      --no-reboot         Push config but do not reboot the switch
      --wait              Wait for switch to respond after reboot
      --no-wait           Return immediately after triggering reboot
@@ -156,6 +163,7 @@ user="admin"
 password="${MOKERLINK_PASSWORD:-}"
 password_file="${MOKERLINK_PASSWORD_FILE:-/run/secrets/mokerlink-password}"
 do_reboot=true
+dry_run=false
 # wait_for_restart: empty = use transport default; true/false = explicit.
 wait_for_restart=
 
@@ -211,6 +219,15 @@ while [[ $# -gt 0 ]]; do
             password_file="$2"
             shift
             ;;
+        -l|--log-level)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            LOG_LEVEL="$2"
+            export LOG_LEVEL
+            shift
+            ;;
+        --dry-run)
+            dry_run=true
+            ;;
         --no-reboot)
             do_reboot=false
             ;;
@@ -235,6 +252,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Validation ────────────────────────────────────────────────────────────────
+
+validate-log-level "${LOG_LEVEL:-info}"
 
 [[ -n "${transport}" ]] || \
     error "transport is required (--transport serial|http|ssh|ssh-cmd)"
@@ -275,9 +294,14 @@ if [[ "${transport}" == "serial" || "${transport}" == "serial-cmd" ]] \
             break
         fi
     done
-    [[ -n "${serial_port}" ]] || \
-        error "no serial port found; specify with --port \
+    if [[ -z "${serial_port}" ]]; then
+        if is_true "${dry_run}"; then
+            serial_port="(dry-run/no-port)"
+        else
+            error "no serial port found; specify with --port \
 (tried /dev/cu.usbserial-*, /dev/ttyUSB0, /dev/ttyACM0)"
+        fi
+    fi
 fi
 
 # Serial bootstrap: fall back to factory default password when none supplied.
@@ -301,8 +325,7 @@ fi
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
-info "begin ${command}"
-info "transport=${transport} host=${host} config=${config_file}"
+info "begin transport=${transport} host=${host} config=${config_file}"
 
 config_basename=$(basename "${config_file}")
 tftp_pid=
@@ -331,7 +354,7 @@ start_tftp() {
     tr -d '\r' < "${config_file}" \
         | awk '{ printf "%s\r\n", $0 }' \
         > "${crlf_dir}/${config_basename}"
-    info "starting TFTP server to serve ${config_basename}"
+    debug "starting TFTP server to serve ${config_basename}"
     bash "${bindir}/tftp-serve" \
         --file "${crlf_dir}/${config_basename}" &
     tftp_pid=$!
@@ -351,13 +374,27 @@ case "${transport}" in
 
         is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
 
-        info "starting serial command-stream restore on ${serial_port}"
-        EXPECT_USERNAME="${user}" \
-        EXPECT_PASSWORD="${password}" \
-        EXPECT_REBOOT="${_reboot_flag}" \
-            bash "${bindir}/set-config-cmd-serial" \
-                "${serial_port}" \
-                "${commands_file}"
+        # Compute numeric log level for Tcl (can't call log-level() inside
+        # the env prefix, so capture it first).
+        _log_level_num=$(log-level "${LOG_LEVEL:-info}")
+
+        if is_true "${dry_run}"; then
+            _cmd_count=$(grep -c '[^[:space:]]' "${commands_file}" || echo 0)
+            info "dry-run: would send ${_cmd_count} commands to ${serial_port}"
+            log-level-enabled debug && \
+                debug "dry-run: command stream:" && \
+                grep '[^[:space:]]' "${commands_file}" \
+                | while IFS= read -r _l; do debug "  ${_l}"; done || true
+        else
+            info "starting serial command-stream restore on ${serial_port}"
+            EXPECT_USERNAME="${user}" \
+            EXPECT_PASSWORD="${password}" \
+            EXPECT_REBOOT="${_reboot_flag}" \
+            EXPECT_LOG_LEVEL_NUM="${_log_level_num}" \
+                bash "${bindir}/set-config-cmd-serial" \
+                    "${serial_port}" \
+                    "${commands_file}"
+        fi
         ;;
     serial)
         # Determine the bootstrap host IP on the directly-connected interface.
@@ -450,7 +487,8 @@ use --tftp-host IP or ensure a 192.168.2.x address is configured"
         ;;
 esac
 
-if is_true "${do_reboot}" && is_true "${wait_for_restart}"; then
+if is_true "${do_reboot}" && is_true "${wait_for_restart}" \
+        && ! is_true "${dry_run}"; then
     info "waiting for ${host} to come back up"
     bash "${bindir}/wait-for-restart" \
         --host "${host}" \

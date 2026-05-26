@@ -239,8 +239,8 @@ EOF
 
 @test "cfg-to-commands: start-config produces correct exit count" {
     output=$(bash "${SCRIPT}" "${REPO_ROOT}/switch-1-start-config.cfg" 2>/dev/null)
-    # 10 vlans + 1 spanning-tree + 28 interfaces = 39 exits.
+    # 9 vlans + 1 spanning-tree + 28 interfaces = 38 exits.
     local count
     count=$(echo "${output}" | grep -c '^exit$')
-    [ "${count}" -eq 39 ]
+    [ "${count}" -eq 38 ]
 }

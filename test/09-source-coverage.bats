@@ -188,11 +188,18 @@ teardown() {
     [[ "$output" == *"piped line"* ]]
 }
 
-@test "common-functions: debug writes DEBUG severity" {
-    run env INCLUDE_DIR="${INCLUDE_DIR}" \
+@test "common-functions: debug writes DEBUG severity when LOG_LEVEL=debug" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" LOG_LEVEL=debug \
         bash -c 'source "${INCLUDE_DIR}/common-functions"; debug "dbg msg"'
     [ "$status" -eq 0 ]
     [[ "$output" == *"DEBUG"* ]]
+}
+
+@test "common-functions: debug is suppressed at default LOG_LEVEL (info)" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; debug "dbg msg"'
+    [ "$status" -eq 0 ]
+    [[ -z "$output" ]]
 }
 
 @test "common-functions: info writes INFO severity" {
@@ -202,11 +209,62 @@ teardown() {
     [[ "$output" == *"INFO"* ]]
 }
 
-@test "common-functions: ignore writes IGNORE severity" {
+@test "common-functions: trace is suppressed at default LOG_LEVEL (info)" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; trace "trace msg"'
+    [ "$status" -eq 0 ]
+    [[ -z "$output" ]]
+}
+
+@test "common-functions: trace writes TRACE severity when LOG_LEVEL=trace" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" LOG_LEVEL=trace \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; trace "trace msg"'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"TRACE"* ]]
+}
+
+@test "common-functions: ignore is a no-op (produces no output)" {
     run env INCLUDE_DIR="${INCLUDE_DIR}" \
         bash -c 'source "${INCLUDE_DIR}/common-functions"; ignore "ign msg"'
     [ "$status" -eq 0 ]
-    [[ "$output" == *"IGNORE"* ]]
+    [[ -z "$output" ]]
+}
+
+@test "common-functions: log-level-enabled returns 0 for info at default level" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; log-level-enabled info'
+    [ "$status" -eq 0 ]
+}
+
+@test "common-functions: log-level-enabled returns 1 for debug at default level" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; log-level-enabled debug'
+    [ "$status" -ne 0 ]
+}
+
+@test "common-functions: log-level-enabled returns 0 for debug when LOG_LEVEL=debug" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" LOG_LEVEL=debug \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; log-level-enabled debug'
+    [ "$status" -eq 0 ]
+}
+
+@test "common-functions: log-level returns numeric value for known level" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; log-level info'
+    [ "$status" -eq 0 ]
+    [[ "$output" == "30" ]]
+}
+
+@test "common-functions: validate-log-level accepts valid levels" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; validate-log-level trace'
+    [ "$status" -eq 0 ]
+}
+
+@test "common-functions: validate-log-level rejects invalid level" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; validate-log-level bogus'
+    [ "$status" -ne 0 ]
 }
 
 @test "common-functions: error exits non-zero and logs ERROR" {
@@ -215,6 +273,49 @@ teardown() {
     [ "$status" -ne 0 ]
     [[ "$output" == *"ERROR"* ]]
     [[ "$output" == *"err msg"* ]]
+}
+
+@test "common-functions: default format has no timestamp" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; info "plain msg"'
+    [ "$status" -eq 0 ]
+    # Default format is [INFO] message — no YYYYMMDDTHHMMSS timestamp.
+    [[ "$output" == "[INFO] plain msg" ]]
+}
+
+@test "common-functions: LOGGING_INCLUDE_TIMESTAMP adds timestamp to log" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" LOGGING_INCLUDE_TIMESTAMP=true \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; info "ts msg"'
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ [0-9]{8}T[0-9]{6} ]]
+    [[ "$output" == *"ts msg"* ]]
+}
+
+@test "common-functions: LOGGING_INCLUDE_ALL adds timestamp and command" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" LOGGING_INCLUDE_ALL=true \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; info "all msg"'
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ [0-9]{8}T[0-9]{6} ]]
+    [[ "$output" == *"all msg"* ]]
+    [[ "$output" == *"[INFO]"* ]]
+}
+
+@test "common-functions: is-true (hyphen form) accepts '1'" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; is-true "1"'
+    [ "$status" -eq 0 ]
+}
+
+@test "common-functions: is-true (hyphen form) accepts 'on'" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; is-true "on"'
+    [ "$status" -eq 0 ]
+}
+
+@test "common-functions: is-true rejects 'off'" {
+    run env INCLUDE_DIR="${INCLUDE_DIR}" \
+        bash -c 'source "${INCLUDE_DIR}/common-functions"; is-true "off"'
+    [ "$status" -ne 0 ]
 }
 
 # ── src/bin/get-config ────────────────────────────────────────────────────────
