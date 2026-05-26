@@ -481,6 +481,7 @@ use --tftp-host IP or ensure a 192.168.2.x address is configured"
         EXPECT_USERNAME="${user}" \
         EXPECT_PASSWORD="${password}" \
         EXPECT_REBOOT="${_reboot_flag}" \
+        EXPECT_LOG_LEVEL_NUM="${_log_level_num}" \
             bash "${bindir}/set-config-cmd" \
                 "${host}" \
                 "${commands_file}"

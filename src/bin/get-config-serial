@@ -21,10 +21,12 @@
 #   CONFIG_TYPE  Configuration to fetch: running, startup, or backup
 #
 # ENVIRONMENT
-#   EXPECT_USERNAME  Login username (default: admin)
-#   EXPECT_PASSWORD  Login password (default: admin)
-#   EXPECT_TIMEOUT   Seconds to wait for each prompt (default: 30)
-#   DEBUG            Set to 'true' to enable expect -d tracing
+#   EXPECT_USERNAME      Login username (default: admin)
+#   EXPECT_PASSWORD      Login password (default: admin)
+#   EXPECT_TIMEOUT       Seconds to wait for each prompt (default: 30)
+#   EXPECT_LOG_LEVEL_NUM Numeric log threshold from the bash LOG_LEVEL
+#                        (TRACE=10 DEBUG=20 INFO=30; default: 30)
+#   DEBUG                Set to 'true' to enable expect -d tracing
 
 bindir=$(readlink -f "$(dirname "${0}")")
 export PATH=${bindir}:${PATH}
@@ -47,6 +49,9 @@ esac
 expect_args=()
 is_true "${DEBUG}" && expect_args+=(-d)
 
+# Compute numeric log level for Tcl if not already provided by the caller.
+_log_level_num="${EXPECT_LOG_LEVEL_NUM:-$(log-level "${LOG_LEVEL:-info}")}"
+
 __get_config_raw__() {
     # Parameters are exported as EXPECT_* variables and read inside the Tcl
     # script via $env(...).  The heredoc delimiter is single-quoted so bash
@@ -56,7 +61,30 @@ __get_config_raw__() {
     EXPECT_USERNAME="${EXPECT_USERNAME:-admin}" \
     EXPECT_PASSWORD="${EXPECT_PASSWORD:-admin}" \
     EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
+    EXPECT_LOG_LEVEL_NUM="${_log_level_num}" \
     /usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
+
+        # ── Logging ────────────────────────────────────────────────────────────
+        #
+        # emit_log LEVEL MESSAGE
+        #   Writes "[LEVEL] TIMESTAMP get-config-serial MESSAGE" to stderr.
+        #   Suppressed when LEVEL's numeric value is below EXPECT_LOG_LEVEL_NUM.
+
+        set log_level_num [expr {
+            [info exists env(EXPECT_LOG_LEVEL_NUM)] \
+                ? $env(EXPECT_LOG_LEVEL_NUM) \
+                : 30
+        }]
+
+        proc emit_log {level msg} {
+            global log_level_num
+            array set lvl_num {TRACE 10  DEBUG 20  INFO 30  WARN 50  ERROR 60}
+            if {![info exists lvl_num($level)]} { return }
+            if {$lvl_num($level) < $log_level_num} { return }
+            set ts [clock format [clock seconds] -format %Y%m%dT%H%M%S]
+            puts stderr "\[$level\] $ts get-config-serial $msg"
+        }
+
         log_user 1
         # Increase match_max for large switch configs (ACLs, routing tables, port
         # definitions).  Default 2000 is too small.
@@ -91,7 +119,7 @@ __get_config_raw__() {
         }
         timeout {
             if { $_tries > 4 } {
-                puts stderr "ERROR: could not reach login prompt"
+                emit_log ERROR "could not reach login prompt"
                 exit 1
             }
             incr _tries
@@ -112,7 +140,7 @@ __get_config_raw__() {
                 expect "Password: "
             }
             timeout {
-                puts stderr "ERROR: no Password: prompt after sending username"
+                emit_log ERROR "no Password: prompt after sending username"
                 exit 1
             }
         }

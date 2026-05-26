@@ -66,6 +66,8 @@
 #   TAILSCALE_HOST         Fallback hostname when MOKERLINK_HOST is unset
 #   MOKERLINK_BACKUP_NAME_FILE
 #                          (tar format only) Path to write computed tar filename
+#   LOG_LEVEL              Logging verbosity: trace|debug|info|warn|error
+#                          (default: info)
 #   DEBUG                  Enable debug tracing (default: false)
 #   ENV                    Env-file path (default: ~/.env)
 #
@@ -100,6 +102,8 @@ Download a backup of a Mokerlink managed network switch.
 Options:
   -h,-?,--help           Display this help text
   -v,--version           Display command version
+  -l,--log-level LEVEL   Log verbosity: trace|debug|info|warn|error
+                         (env: LOG_LEVEL; default: info)
   -t,--transport TRANS   Transport: ssh (default) or serial
   -a,--all               Include all configurations (default)
   -r,--running           Include running configuration
@@ -173,6 +177,12 @@ while [[ $# -gt 0 ]]; do
         -v|--version)
             show_version
             exit 0
+            ;;
+        -l|--log-level)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            LOG_LEVEL="$2"
+            export LOG_LEVEL
+            shift
             ;;
         -t|--transport)
             [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
@@ -249,6 +259,11 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+validate-log-level "${LOG_LEVEL:-info}"
+
+# Compute numeric log level for passing to child Tcl/Expect scripts.
+_log_level_num=$(log-level "${LOG_LEVEL:-info}")
 
 # If no positive selection was made, default to all
 if ! "${has_positive}"; then
@@ -346,6 +361,7 @@ for config in "${configs[@]}"; do
         # Pass credentials via env vars to avoid process-list exposure.
         EXPECT_USERNAME="${user}" \
         EXPECT_PASSWORD="${password}" \
+        EXPECT_LOG_LEVEL_NUM="${_log_level_num}" \
             bash "${bindir}/get-config-serial" "${serial_port}" "${config}" \
             >> "${config_tmp}"
     else
@@ -362,14 +378,14 @@ for config in "${configs[@]}"; do
     #   sed 2        → strip trailing whitespace
     #   sed 3        → remove the leading 'v' prefix the firmware adds
     version=$(grep -m1 '^! System Version: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g' | sed 's/^v//g')
-    is_true "${DEBUG}" && debug "version='$version'"
+    log-level-enabled DEBUG && debug "version='$version'"
     [[ -n "${version}" ]] || error 'invalid Mokerlink configuration file - missing version'
     hostname=$(grep -m1 '^! System Name: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g')
-    is_true "${DEBUG}" && debug "hostname='$hostname'"
+    log-level-enabled DEBUG && debug "hostname='$hostname'"
     [[ -n "${hostname}" ]] || error 'invalid Mokerlink configuration file - missing hostname'
     if [[ "${format}" == "tar" ]]; then
         xml_file="${timestamp}-${hostname}-mokerlink-${version}-${config}-config-backup.xml"
-        is_true "${DEBUG}" && debug "xml_file='$xml_file'"
+        log-level-enabled DEBUG && debug "xml_file='$xml_file'"
         # Add header to pulled config file
         (echo 'SYSTEM CONFIG FILE ::= BEGIN' && \
          echo "! Backup: ${xml_file}" && \
@@ -382,7 +398,7 @@ done
 
 if [[ "${format}" == "tar" ]]; then
     tar_name="${timestamp}-${hostname}-mokerlink-${version}-config-backup.tar"
-    is_true "${DEBUG}" && debug "tar_name='${tar_name}'"
+    log-level-enabled DEBUG && debug "tar_name='${tar_name}'"
     # ':=' assigns empty string when the variable is unset, preventing a
     # nounset error; the block runs only when the caller provided a path.
     if [[ -n "${MOKERLINK_BACKUP_NAME_FILE:=}" ]]; then

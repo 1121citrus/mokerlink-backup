@@ -14,9 +14,9 @@
 #   a time, waiting for the switch prompt after each.  No TFTP server or
 #   elevated privileges are required.
 #
-#   The command stream is expected to start with "configure terminal" and
-#   end with "end" then "save" (as produced by cfg-to-commands).  After
-#   the save, the script optionally issues "reboot".
+#   The command stream is expected to start with "configure" and end with
+#   "end" then "save" (as produced by cfg-to-commands).  After the save,
+#   the script optionally issues "reboot".
 #
 #   SSH flags mirror get-config and set-config-ssh exactly.
 #   All session parameters are passed via EXPECT_* environment variables.
@@ -27,11 +27,14 @@
 #                  pipe from cfg-to-commands)
 #
 # ENVIRONMENT
-#   EXPECT_USERNAME  Login username (default: admin)
-#   EXPECT_PASSWORD  Login password (required)
-#   EXPECT_REBOOT    'y' to reboot after save, 'n' to skip (default: n)
-#   EXPECT_TIMEOUT   Seconds to wait for each prompt (default: 30)
-#   DEBUG            Set to 'true' to enable expect -d tracing
+#   EXPECT_USERNAME      Login username (default: admin)
+#   EXPECT_PASSWORD      Login password (required)
+#   EXPECT_REBOOT        'y' to reboot after save, 'n' to skip (default: n)
+#   EXPECT_TIMEOUT       Seconds to wait for each prompt (default: 30)
+#   EXPECT_LOG_LEVEL_NUM Numeric log threshold from the bash LOG_LEVEL
+#                        (TRACE=10 DEBUG=20 INFO=30; default: 30)
+#   DEBUG                Enable expect -d tracing and bash xtrace (default: false)
+#   LOG_LEVEL            Log verbosity level (read by common-functions)
 
 bindir=$(readlink -f "$(dirname "${0}")")
 export PATH=${bindir}:${PATH}
@@ -51,6 +54,10 @@ commands_file="${2:?need commands file path}"
 expect_args=()
 is_true "${DEBUG}" && expect_args+=(-d)
 
+# Compute numeric log level for Tcl if not already provided by the caller.
+# log-level() returns 30 for info (the default).
+_log_level_num="${EXPECT_LOG_LEVEL_NUM:-$(log-level "${LOG_LEVEL:-info}")}"
+
 # Read the commands file into an environment variable so the expect script
 # can iterate over them without needing filesystem access inside the Tcl
 # heredoc.  Newlines are preserved; the Tcl script splits on "\n".
@@ -60,8 +67,68 @@ EXPECT_USERNAME="${EXPECT_USERNAME:-admin}" \
 EXPECT_PASSWORD="${EXPECT_PASSWORD:?need EXPECT_PASSWORD}" \
 EXPECT_REBOOT="${EXPECT_REBOOT:-n}" \
 EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
+EXPECT_LOG_LEVEL_NUM="${_log_level_num}" \
 /usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
-    log_user 1
+
+    # ── Logging ────────────────────────────────────────────────────────────────
+    #
+    # emit_log LEVEL MESSAGE
+    #   Writes "[LEVEL] TIMESTAMP set-config-cmd MESSAGE" to stderr.
+    #   Suppressed when LEVEL's numeric value is below EXPECT_LOG_LEVEL_NUM.
+    #   Numeric thresholds: TRACE=10  DEBUG=20  INFO=30  WARN=50  ERROR=60
+
+    set log_level_num [expr {
+        [info exists env(EXPECT_LOG_LEVEL_NUM)] \
+            ? $env(EXPECT_LOG_LEVEL_NUM) \
+            : 30
+    }]
+
+    proc emit_log {level msg} {
+        global log_level_num
+        array set lvl_num {TRACE 10  DEBUG 20  INFO 30  WARN 50  ERROR 60}
+        if {![info exists lvl_num($level)]} { return }
+        if {$lvl_num($level) < $log_level_num} { return }
+        set ts [clock format [clock seconds] -format %Y%m%dT%H%M%S]
+        puts stderr "\[$level\] $ts set-config-cmd $msg"
+    }
+
+    # ── Section detection ──────────────────────────────────────────────────────
+    #
+    # section_for WORD   — map a top-level command's first word to a section tag
+    # section_label TAG  — human label for each section tag (emitted at INFO)
+    #
+    # Only top-level commands (not sub-mode commands inside a block) trigger
+    # section transitions; in_block tracking mirrors cfg-to-commands logic.
+
+    proc section_for {word} {
+        switch -- $word {
+            configure     { return startup }
+            vlan          { return vlans }
+            interface     { return interfaces }
+            spanning-tree { return spanning_tree }
+            line          { return access }
+            end           { return commit }
+            save          { return save }
+            default       { return global }
+        }
+    }
+
+    proc section_label {section} {
+        switch -- $section {
+            startup       { return "entering configuration mode" }
+            vlans         { return "loading VLAN topology" }
+            interfaces    { return "assigning interface roles" }
+            spanning_tree { return "configuring spanning tree" }
+            access        { return "configuring line access" }
+            commit        { return "committing configuration" }
+            save          { return "saving to startup-config" }
+            default       { return "" }
+        }
+    }
+
+    # ── Expect session setup ───────────────────────────────────────────────────
+
+    log_user 0
     set match_max 1000000
     set timeout   $env(EXPECT_TIMEOUT)
     set hostname  $env(EXPECT_HOSTNAME)
@@ -69,6 +136,9 @@ EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
     set password  $env(EXPECT_PASSWORD)
     set do_reboot $env(EXPECT_REBOOT)
 
+    # ── Open SSH session ───────────────────────────────────────────────────────
+
+    emit_log DEBUG "connecting to $hostname"
     spawn ssh -F /dev/null -T -o LogLevel=quiet \
         -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null \
@@ -76,37 +146,124 @@ EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
         -o PubkeyAcceptedAlgorithms=+ssh-rsa \
         -l $username $hostname
 
+    # ── Login ──────────────────────────────────────────────────────────────────
+
+    emit_log DEBUG "sending credentials for $username"
     expect "Username: "
     send -- "$username\r"
     expect "Password: "
     send -- "$password\r"
     expect "# "
+    emit_log DEBUG "authenticated"
 
-    # Disable the pager so multi-line responses are not interrupted.
+    # ── Disable output pager ───────────────────────────────────────────────────
+
+    emit_log DEBUG "disabling output pager"
     send -- "terminal length 0\r"
-    expect "# "
+    expect -re {[)>#] $}
 
-    # Replay each command line, waiting for the prompt after each.
-    # The prompt pattern covers both privileged (#) and config sub-mode
-    # prompts which end in ')#' (e.g. Switch(config-if)#).
+    # ── Command replay ─────────────────────────────────────────────────────────
+    # Iterate through the command stream.  After each command:
+    #   DEBUG  — logs the command being sent
+    #   INFO   — announces section transitions (VLAN, interface, etc.)
+    #   TRACE  — shows the switch's response text
+    #
+    # Pattern covers privileged (#), user-exec (>), and any config sub-mode
+    # prompt ending in ')#' (e.g. switch(config-if)#).
+
     set commands [split $env(EXPECT_COMMANDS) "\n"]
+    set section ""
+    set in_block 0
+
     foreach cmd $commands {
-        # Skip blank lines that may appear at the start or end of the file.
-        if {[string trim $cmd] eq ""} { continue }
-        send -- "$cmd\r"
-        expect -re {[)#] $}
+        set trimmed [string trim $cmd]
+        if {$trimmed eq ""} { continue }
+        set word [lindex [split $trimmed] 0]
+
+        # Section transition: only at top level (not inside a block).
+        if {!$in_block} {
+            set new_section [section_for $word]
+            # Announce every named section except "global" (pre-VLAN settings
+            # have no distinct announcement; the mode entry covers configure).
+            if {$new_section ne "global" && $new_section ne $section} {
+                set section $new_section
+                set label [section_label $section]
+                if {$label ne ""} { emit_log INFO $label }
+            }
+        }
+
+        # Track block depth: block-openers enter sub-mode; exit leaves it.
+        if {$word eq "exit"} {
+            set in_block 0
+        } elseif {$word eq "vlan"      || $word eq "interface" ||
+                  $word eq "spanning-tree" || $word eq "router" ||
+                  $word eq "line"} {
+            set in_block 1
+        }
+
+        emit_log DEBUG "sending: $trimmed"
+        send -- "$trimmed\r"
+        expect -re {[)>#] $}
+
+        # Parse expect_out(buffer) to extract the switch's response text.
+        # Buffer layout (after stripping \r):
+        #   line 0:   echo-back of the command we sent
+        #   lines 1…N-1: switch response (may be empty)
+        #   line N:   new prompt
+        if {$log_level_num <= 10} {
+            set buf $expect_out(buffer)
+            regsub -all {\r} $buf {} buf
+            set lines [split $buf "\n"]
+            # Drop empty trailing entries produced by the trailing newline.
+            while {[llength $lines] > 0 &&
+                   [string trim [lindex $lines end]] eq ""} {
+                set lines [lrange $lines 0 end-1]
+            }
+            # Need at least 3 lines: echo, response, prompt.
+            if {[llength $lines] >= 3} {
+                set response [lrange $lines 1 end-1]
+                set has_response 0
+                foreach rline $response {
+                    if {[string trim $rline] ne ""} {
+                        set has_response 1; break
+                    }
+                }
+                if {$has_response} {
+                    emit_log TRACE "switch response:"
+                    foreach rline $response {
+                        if {[string trim $rline] ne ""} {
+                            emit_log TRACE "  $rline"
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    if { $do_reboot eq "y" } {
+    # ── Reboot (optional) ──────────────────────────────────────────────────────
+    # The command stream ends at 'save' which returns to privileged exec (#).
+    # The expect loop consumed that prompt, so we are now at '#' with no
+    # pending output — send 'reboot' directly without an extra expect.
+
+    if {$do_reboot eq "y"} {
+        emit_log INFO "rebooting switch"
         send -- "reboot\r"
+        # Respond 'y' to the save-to-startup prompt.  The config was already
+        # saved above by the 'save' command, so this is redundant but
+        # conservative — saying 'y' ensures the switch records the config
+        # even if the prior 'save' had any timing issues.
+        expect {
+            -nocase "startup-config" { send -- "y\r" }
+            eof                      { }
+        }
         catch { expect eof }
     } else {
-        catch {send -- "exit\r"}
+        catch { send -- "exit\r" }
         expect {
-            "> " { catch {send -- "exit\r"} }
+            "> " { catch { send -- "exit\r" } }
             eof  {}
             timeout {}
         }
-        catch {expect eof}
+        catch { expect eof }
     }
 __END_OF_SCRIPT__
