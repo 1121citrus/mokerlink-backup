@@ -379,12 +379,57 @@ case "${transport}" in
         _log_level_num=$(log-level "${LOG_LEVEL:-info}")
 
         if is_true "${dry_run}"; then
-            _cmd_count=$(grep -c '[^[:space:]]' "${commands_file}" || echo 0)
+            # Walk the command file and emit section-transition INFO messages
+            # using the same first-word dispatch as set-config-cmd-serial.
+            # This gives the user the same phase-level progress view they
+            # would see in a real run without touching any hardware.
+            _section=""
+            _in_block=0
+            _cmd_count=0
+            while IFS= read -r _cmd; do
+                # Strip leading/trailing whitespace
+                _t="${_cmd#"${_cmd%%[![:space:]]*}"}"
+                _t="${_t%"${_t##*[![:space:]]}"}"
+                [[ -z "${_t}" ]] && continue
+                (( _cmd_count++ )) || true
+                _word="${_t%% *}"
+
+                if (( _in_block == 0 )); then
+                    case "${_word}" in
+                        configure)     _ns=startup ;;
+                        vlan)          _ns=vlans ;;
+                        interface)     _ns=interfaces ;;
+                        spanning-tree) _ns=spanning_tree ;;
+                        line)          _ns=access ;;
+                        end)           _ns=commit ;;
+                        save)          _ns=save ;;
+                        *)             _ns=global ;;
+                    esac
+                    if [[ "${_ns}" != "global" && "${_ns}" != "${_section}" ]]; then
+                        _section="${_ns}"
+                        case "${_section}" in
+                            startup)       _label="entering configuration mode" ;;
+                            vlans)         _label="loading VLAN topology" ;;
+                            interfaces)    _label="assigning interface roles" ;;
+                            spanning_tree) _label="configuring spanning tree" ;;
+                            access)        _label="configuring line access" ;;
+                            commit)        _label="committing configuration" ;;
+                            save)          _label="saving to startup-config" ;;
+                            *)             _label="" ;;
+                        esac
+                        [[ -n "${_label}" ]] && info "dry-run: ${_label}"
+                    fi
+                fi
+
+                # Track block depth to suppress section detection inside blocks.
+                case "${_word}" in
+                    exit)          _in_block=0 ;;
+                    vlan|interface|spanning-tree|router|line) _in_block=1 ;;
+                esac
+
+                log-level-enabled DEBUG && debug "  ${_t}"
+            done < "${commands_file}"
             info "dry-run: would send ${_cmd_count} commands to ${serial_port}"
-            log-level-enabled debug && \
-                debug "dry-run: command stream:" && \
-                grep '[^[:space:]]' "${commands_file}" \
-                | while IFS= read -r _l; do debug "  ${_l}"; done || true
         else
             info "starting serial command-stream restore on ${serial_port}"
             EXPECT_USERNAME="${user}" \
