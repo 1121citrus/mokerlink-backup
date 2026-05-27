@@ -338,7 +338,7 @@ cleanup() {
         kill "${tftp_pid}" 2>/dev/null || true
         wait "${tftp_pid}" 2>/dev/null || true
     fi
-    [[ -n "${crlf_dir:-}" ]] && rm -rf "${crlf_dir}"
+    [[ -z "${crlf_dir:-}" ]] || rm -rf "${crlf_dir}"
 }
 trap cleanup EXIT
 
@@ -360,6 +360,12 @@ start_tftp() {
     tftp_pid=$!
     # Give the server a moment to open the port before the switch connects.
     sleep 2
+    # Verify the server is still alive.  On macOS, port 69 requires root;
+    # if tftp-serve exited early, give a clear error rather than letting the
+    # switch time out on a TFTP connection that was never established.
+    kill -0 "${tftp_pid}" 2>/dev/null || \
+        error "TFTP server failed to start — on macOS re-run with sudo; \
+on Linux ensure port 69 is available (may need sudo)"
 }
 
 # Compute numeric log level for Tcl once here; used by any transport branch
@@ -446,72 +452,108 @@ case "${transport}" in
         # Determine the bootstrap host IP on the directly-connected interface.
         # The switch is at 192.168.2.1; the host must be in 192.168.2.x/24.
         # --tftp-host (or TFTP_HOST env var) overrides auto-detection.
-        if [[ -n "${tftp_host_override}" ]]; then
-            tftp_host="${tftp_host_override}"
-        else
-            tftp_host=$(ip -4 addr show 2>/dev/null \
-                | grep -oP '(?<=inet )192\.168\.2\.\d+' \
-                | grep -v '^192\.168\.2\.1$' \
-                | head -1 || true)
-            if [[ -z "${tftp_host}" ]]; then
-                # macOS fallback via route + ipconfig.
-                tftp_host=$(route -n get default 2>/dev/null \
-                    | awk '/interface:/{print $2}' \
-                    | xargs -I{} ipconfig getifaddr {} 2>/dev/null \
-                    || true)
-            fi
-            [[ -n "${tftp_host}" ]] || \
-                error "cannot determine local IP for TFTP; \
+        # Skip detection for dry-run to avoid the TFTP/sudo requirement.
+        if ! is_true "${dry_run}"; then
+            if [[ -n "${tftp_host_override}" ]]; then
+                tftp_host="${tftp_host_override}"
+            else
+                # Portable IP detection: combine ip(1) (Linux) and ifconfig(8)
+                # (macOS/Linux); grep -oP is not available on macOS BSD grep.
+                tftp_host=$(
+                    { ip -4 addr show 2>/dev/null; \
+                      ifconfig 2>/dev/null; } \
+                    | grep -oE '\binet 192\.168\.2\.[0-9]+' \
+                    | sed 's/^inet //' \
+                    | sort -u \
+                    | grep -v '^192\.168\.2\.1$' \
+                    | head -1 || true
+                )
+                if [[ -z "${tftp_host}" ]]; then
+                    # macOS fallback: find the interface with a route to the
+                    # switch's factory-default IP (192.168.2.1), not the
+                    # default-gateway interface which may be on a different subnet.
+                    tftp_host=$(route -n get 192.168.2.1 2>/dev/null \
+                        | awk '/interface:/{print $2}' \
+                        | xargs -I{} ipconfig getifaddr {} 2>/dev/null \
+                        || true)
+                fi
+                [[ -n "${tftp_host}" ]] || \
+                    error "cannot determine local IP for TFTP; \
 use --tftp-host IP or ensure a 192.168.2.x address is configured"
+            fi
         fi
-
-        start_tftp "${tftp_host}"
 
         # Convert do_reboot (true/false) to y/n for the expect script.
         is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
 
-        info "starting serial restore on ${serial_port}"
-        EXPECT_USERNAME="${user}" \
-        EXPECT_PASSWORD="${password}" \
-        EXPECT_REBOOT="${_reboot_flag}" \
-            bash "${bindir}/set-config-serial" \
-                "${serial_port}" \
-                "${tftp_host}" \
-                "${config_basename}"
+        if is_true "${dry_run}"; then
+            info "dry-run: would start TFTP server on <auto-detected 192.168.2.x>"
+            info "dry-run: would push ${config_basename} to switch via serial+TFTP"
+            info "dry-run: would reboot=${_reboot_flag}"
+        else
+            start_tftp "${tftp_host}"
+            info "starting serial restore on ${serial_port}"
+            EXPECT_USERNAME="${user}" \
+            EXPECT_PASSWORD="${password}" \
+            EXPECT_REBOOT="${_reboot_flag}" \
+                bash "${bindir}/set-config-serial" \
+                    "${serial_port}" \
+                    "${tftp_host}" \
+                    "${config_basename}"
+        fi
         ;;
     http)
         error "http transport not yet implemented"
         ;;
     ssh)
-        if [[ -n "${tftp_host_override}" ]]; then
-            tftp_host="${tftp_host_override}"
-        else
-            tftp_host=$(ip -4 addr show 2>/dev/null \
-                | grep -oP '(?<=inet )\d+\.\d+\.\d+\.\d+' \
-                | grep -v "^${host}$" \
-                | head -1 || true)
-            if [[ -z "${tftp_host}" ]]; then
-                tftp_host=$(route -n get default 2>/dev/null \
-                    | awk '/interface:/{print $2}' \
-                    | xargs -I{} ipconfig getifaddr {} 2>/dev/null \
-                    || true)
+        # Skip TFTP-host detection for dry-run to avoid the sudo requirement.
+        if ! is_true "${dry_run}"; then
+            if [[ -n "${tftp_host_override}" ]]; then
+                tftp_host="${tftp_host_override}"
+            else
+                # Portable IP detection: combine ip(1) (Linux) and ifconfig(8)
+                # (macOS/Linux); grep -oP is not available on macOS BSD grep.
+                tftp_host=$(
+                    { ip -4 addr show 2>/dev/null; \
+                      ifconfig 2>/dev/null; } \
+                    | grep -oE '\binet [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
+                    | sed 's/^inet //' \
+                    | sort -u \
+                    | grep -v "^${host}$" \
+                    | grep -v '^127\.' \
+                    | head -1 || true
+                )
+                if [[ -z "${tftp_host}" ]]; then
+                    # macOS fallback: find the interface with a route to the
+                    # switch ($host), not the default-gateway interface which
+                    # may be on a different subnet.
+                    tftp_host=$(route -n get "${host}" 2>/dev/null \
+                        | awk '/interface:/{print $2}' \
+                        | xargs -I{} ipconfig getifaddr {} 2>/dev/null \
+                        || true)
+                fi
+                [[ -n "${tftp_host}" ]] || \
+                    error "cannot determine local IP for TFTP; use --tftp-host IP"
             fi
-            [[ -n "${tftp_host}" ]] || \
-                error "cannot determine local IP for TFTP; use --tftp-host IP"
         fi
-
-        start_tftp "${tftp_host}"
 
         is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
 
-        info "starting SSH+TFTP restore to ${host}"
-        EXPECT_USERNAME="${user}" \
-        EXPECT_PASSWORD="${password}" \
-        EXPECT_REBOOT="${_reboot_flag}" \
-            bash "${bindir}/set-config-ssh" \
-                "${host}" \
-                "${tftp_host}" \
-                "${config_basename}"
+        if is_true "${dry_run}"; then
+            info "dry-run: would start TFTP server on <auto-detected local IP>"
+            info "dry-run: would upload ${config_basename} to ${host} via TFTP"
+            info "dry-run: would reboot=${_reboot_flag}"
+        else
+            start_tftp "${tftp_host}"
+            info "starting SSH+TFTP restore to ${host}"
+            EXPECT_USERNAME="${user}" \
+            EXPECT_PASSWORD="${password}" \
+            EXPECT_REBOOT="${_reboot_flag}" \
+                bash "${bindir}/set-config-ssh" \
+                    "${host}" \
+                    "${tftp_host}" \
+                    "${config_basename}"
+        fi
         ;;
     ssh-cmd)
         # Parse the config file into an interactive CLI command stream,

@@ -127,6 +127,14 @@ trap cleanup EXIT
 
 basename=$(basename "${serve_file}")
 
+# TFTP listens on port 69 (UDP), which is privileged on all platforms.
+# Give an immediate, clear error rather than a confusing permission failure
+# buried in background output.
+if [[ "$(id -u)" -ne 0 ]]; then
+    error "TFTP server requires root (port 69 is privileged); \
+re-run the restore command with sudo"
+fi
+
 # Detect and start the appropriate backend.
 if [[ "$(uname -s)" == "Darwin" ]] && \
         [[ -f /System/Library/LaunchDaemons/tftp.plist ]]; then
