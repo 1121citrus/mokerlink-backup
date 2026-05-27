@@ -362,6 +362,11 @@ start_tftp() {
     sleep 2
 }
 
+# Compute numeric log level for Tcl once here; used by any transport branch
+# that invokes an Expect child (serial-cmd, ssh-cmd).  Must precede the case
+# statement so every branch can reference it without recomputing.
+_log_level_num=$(log-level "${LOG_LEVEL:-info}")
+
 case "${transport}" in
     serial-cmd)
         # Parse the config file into an interactive CLI command stream,
@@ -373,10 +378,6 @@ case "${transport}" in
             > "${commands_file}"
 
         is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
-
-        # Compute numeric log level for Tcl (can't call log-level() inside
-        # the env prefix, so capture it first).
-        _log_level_num=$(log-level "${LOG_LEVEL:-info}")
 
         if is_true "${dry_run}"; then
             # Walk the command file and emit section-transition INFO messages
@@ -523,13 +524,60 @@ use --tftp-host IP or ensure a 192.168.2.x address is configured"
         is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
 
         info "starting SSH command-stream restore to ${host}"
-        EXPECT_USERNAME="${user}" \
-        EXPECT_PASSWORD="${password}" \
-        EXPECT_REBOOT="${_reboot_flag}" \
-        EXPECT_LOG_LEVEL_NUM="${_log_level_num}" \
-            bash "${bindir}/set-config-cmd" \
-                "${host}" \
-                "${commands_file}"
+        if is_true "${dry_run}"; then
+            # Walk the command file and emit section-transition INFO messages
+            # using the same first-word dispatch as set-config-cmd.
+            _section=""
+            _in_block=0
+            _cmd_count=0
+            while IFS= read -r _cmd; do
+                _t="${_cmd#"${_cmd%%[![:space:]]*}"}"
+                _t="${_t%"${_t##*[![:space:]]}"}"
+                [[ -z "${_t}" ]] && continue
+                (( _cmd_count++ )) || true
+                _word="${_t%% *}"
+                if (( _in_block == 0 )); then
+                    case "${_word}" in
+                        configure)     _ns=startup ;;
+                        vlan)          _ns=vlans ;;
+                        interface)     _ns=interfaces ;;
+                        spanning-tree) _ns=spanning_tree ;;
+                        line)          _ns=access ;;
+                        end)           _ns=commit ;;
+                        save)          _ns=save ;;
+                        *)             _ns=global ;;
+                    esac
+                    if [[ "${_ns}" != "global" && "${_ns}" != "${_section}" ]]; then
+                        _section="${_ns}"
+                        case "${_section}" in
+                            startup)       _label="entering configuration mode" ;;
+                            vlans)         _label="loading VLAN topology" ;;
+                            interfaces)    _label="assigning interface roles" ;;
+                            spanning_tree) _label="configuring spanning tree" ;;
+                            access)        _label="configuring line access" ;;
+                            commit)        _label="committing configuration" ;;
+                            save)          _label="saving to startup-config" ;;
+                            *)             _label="" ;;
+                        esac
+                        [[ -n "${_label}" ]] && info "dry-run: ${_label}"
+                    fi
+                fi
+                case "${_word}" in
+                    exit)                                       _in_block=0 ;;
+                    vlan|interface|spanning-tree|router|line)   _in_block=1 ;;
+                esac
+                log-level-enabled DEBUG && debug "  ${_t}"
+            done < "${commands_file}"
+            info "dry-run: would send ${_cmd_count} commands to ${host}"
+        else
+            EXPECT_USERNAME="${user}" \
+            EXPECT_PASSWORD="${password}" \
+            EXPECT_REBOOT="${_reboot_flag}" \
+            EXPECT_LOG_LEVEL_NUM="${_log_level_num}" \
+                bash "${bindir}/set-config-cmd" \
+                    "${host}" \
+                    "${commands_file}"
+        fi
         ;;
 esac
 
