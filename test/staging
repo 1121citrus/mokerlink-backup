@@ -188,12 +188,16 @@ _aws_available() {
     }
 }
 
-# _host_available — return 0 if a live network target is configured.
-# Requires HOST to be non-empty (set via --host on the command line).
+# _host_available — return 0 if a live network target is configured AND
+# reachable.  Requires HOST to be non-empty (set via --host) and responds
+# on TCP port 22 within 1 second.  Tests are skipped rather than failed
+# when the host is set but unreachable (e.g. switch is offline).
 # Used by _meets_requirement for host/switch/pfsense/network requirement tokens.
 # Args: none
 _host_available() {
-    [[ -n "${HOST:-}" ]]
+    [[ -n "${HOST:-}" ]] || return 1
+    # Probe SSH port; suppress all output (bash /dev/tcp does not use tools).
+    (: > "/dev/tcp/${HOST}/22") 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
