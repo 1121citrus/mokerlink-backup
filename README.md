@@ -336,6 +336,69 @@ the Mokerlink firmware does not support modern key exchange algorithms.  The
 switch host key is accepted unconditionally because the firmware regenerates
 it on every factory reset.
 
+#### How command-replay transports work (`serial-cmd` and `ssh-cmd`)
+
+These transports cannot send the `.cfg` file to the switch directly because
+the CLI does not accept the file format produced by `show startup-config`.
+The `cfg-to-commands` helper translates the file into the interactive CLI
+command sequence that a human would type, then the transport issues those
+commands one at a time, waiting for a switch prompt after each.
+
+The `.cfg` file uses an indented block structure:
+
+```text
+SYSTEM CONFIG FILE ::= BEGIN
+! System Version: v1.0.0.27
+vlan 10
+ name "management"
+!
+interface gi1
+ switchport mode access
+ switchport access vlan 10
+!
+```
+
+`cfg-to-commands` converts this to the interactive sequence:
+
+```text
+configure
+vlan 10
+name "management"
+exit
+interface gi1
+switchport mode access
+switchport access vlan 10
+exit
+end
+save
+```
+
+Specific transformations applied:
+
+| Input | Output | Reason |
+|---|---|---|
+| `SYSTEM CONFIG FILE ::= BEGIN` header | stripped | CLI rejects file headers |
+| `!` alone (block terminator) | `exit` | leaves the current config sub-mode |
+| `! comment text` | stripped | CLI does not accept inline comments |
+| blank or whitespace-only lines | stripped | CLI does not accept empty input in config mode |
+| `username …` lines | stripped | stored password hashes cannot be replayed; the CLI prompts interactively for the old password |
+| `interface GEn` | `interface gin` | `show` output uses the `GE` prefix; the `interface` command requires `gi` |
+| indented line (one leading space) | dedented, sent as-is | sub-mode commands are already in scope after the block-opening keyword |
+| implicit start | `configure` prepended | enters global configuration mode |
+| implicit end | `end` then `save` appended | exits config mode and writes startup-config |
+
+#### How TFTP transports work (`serial` and `ssh`)
+
+These transports use the switch CLI's built-in `copy tftp://…` command to
+load the file.  The firmware parses the `.cfg` format natively — no
+translation is required.
+
+The one preparation step applied before serving the file is CRLF
+normalisation: the script converts LF-only line endings (produced by `show`
+output and serial captures) to CRLF (`\r\n`).  The firmware's `copy
+tftp://…` parser requires CRLF; without this step the firmware accepts the
+transfer but silently ignores the contents.
+
 ### Restore a running switch (SSH)
 
 Use `ssh-cmd` or `ssh` when the switch is running and SSH is enabled.
@@ -952,6 +1015,8 @@ Download a backup of a Mokerlink managed network switch.
 Options:
   -h,-?,--help           Display this help text
   -v,--version           Display command version
+  -l,--log-level LEVEL   Log verbosity: trace|debug|info|warn|error
+                         (env: LOG_LEVEL; default: info)
   -t,--transport TRANS   Transport: ssh (default) or serial
   -a,--all               Include all configurations (default)
   -r,--running           Include running configuration
@@ -983,6 +1048,7 @@ Options:
 | Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | *none* |
 | Password file | `-P`, `--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` |
 | Format | `-f`, `--format` | `MOKERLINK_FORMAT` | `tar` |
+| Log level | `-l`, `--log-level` | `LOG_LEVEL` | `info` |
 | Tailscale host | — | `TAILSCALE_HOST` | *none* |
 | Debug | — | `DEBUG` | `false` |
 
@@ -1014,9 +1080,26 @@ Options:
   -P,--password-file FILE
                          Password file (env: MOKERLINK_PASSWORD_FILE;
                          default: /run/secrets/mokerlink-password)
+  -l,--log-level LEVEL   Log verbosity: trace|debug|info|warn|error
+                         (env: LOG_LEVEL; default: info)
+     --dry-run           Show what would be done without connecting
      --no-reboot         Push config but do not reboot the switch
      --wait              Wait for switch to respond after reboot
      --no-wait           Return immediately after triggering reboot
+
+Transports:
+  serial-cmd  Serial console (115200/8N1) with per-command config replay.
+              No TFTP server required; no sudo needed.
+              Works on factory-reset switches where SSH is disabled and
+              the firmware rejects TFTP text-format configs.
+              Recommended for bootstrap and restore.
+  serial      Serial console (115200/8N1) + TFTP file transfer.
+              Requires sudo (TFTP port 69).  Use serial-cmd instead if
+              the firmware rejects text-format configs via TFTP.
+  ssh         SSH session + TFTP file transfer.
+              Requires SSH to be enabled (not the factory default).
+  ssh-cmd     SSH session with per-command config replay; no TFTP needed.
+              Requires SSH to be enabled (not the factory default).
 ```
 
 | Parameter | Option | Environment variable | Default |
@@ -1027,8 +1110,10 @@ Options:
 | Serial port | `--port` | — | auto-detect |
 | TFTP host | `--tftp-host` | `TFTP_HOST` | auto-detect |
 | User | `-u`, `--user` | — | `admin` |
-| Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | `admin` (serial only) |
+| Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | `admin` (serial/serial-cmd only) |
 | Password file | `-P`, `--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` |
+| Log level | `-l`, `--log-level` | `LOG_LEVEL` | `info` |
+| Dry run | `--dry-run` | — | `false` |
 
 `--wait` / `--no-wait` default by transport: `serial-cmd` and `serial`
 default to `--wait`; `ssh` and `ssh-cmd` default to `--no-wait`.
