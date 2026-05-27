@@ -69,3 +69,17 @@ setup() {
 @test "set-config-cmd: default do_reboot is n (no automatic reboot)" {
     grep -q 'EXPECT_REBOOT:-n' "${SCRIPT}"
 }
+
+# ── Connection error handling ─────────────────────────────────────────────────
+
+@test "set-config-cmd: eof arm handles SSH connection closed before login" {
+    grep -q 'eof' "${SCRIPT}"
+}
+
+@test "set-config-cmd: eof arm emits error about SSH being enabled" {
+    grep -q 'SSH.*enabled' "${SCRIPT}"
+}
+
+@test "set-config-cmd: timeout arm handles no login prompt" {
+    grep -q 'timed out waiting for SSH login prompt' "${SCRIPT}"
+}

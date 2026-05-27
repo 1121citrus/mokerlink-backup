@@ -74,3 +74,31 @@ setup() {
     # grep needs \\r to match the literal backslash-r in the file.
     grep -q 'exit\\r' "${SCRIPT}"
 }
+
+# ── Connection error handling ─────────────────────────────────────────────────
+
+@test "set-config-ssh: eof arm handles SSH connection closed before login" {
+    grep -q 'eof' "${SCRIPT}"
+}
+
+@test "set-config-ssh: eof arm emits error about SSH being enabled" {
+    grep -q 'SSH.*enabled' "${SCRIPT}"
+}
+
+@test "set-config-ssh: timeout arm handles no login prompt" {
+    grep -q 'timed out waiting for SSH login prompt' "${SCRIPT}"
+}
+
+# ── Logging framework ─────────────────────────────────────────────────────────
+
+@test "set-config-ssh: uses emit_log proc for structured output" {
+    grep -q 'proc emit_log' "${SCRIPT}"
+}
+
+@test "set-config-ssh: routes emit_log through emit-log helper" {
+    grep -q 'exec emit-log' "${SCRIPT}"
+}
+
+@test "set-config-ssh: LOGGING_COMMAND_OVERRIDE is set for correct script name" {
+    grep -q 'LOGGING_COMMAND_OVERRIDE="set-config-ssh"' "${SCRIPT}"
+}

@@ -32,11 +32,14 @@
 #   CONFIG_BASENAME  Filename the switch will request from the TFTP server
 #
 # ENVIRONMENT
-#   EXPECT_USERNAME  Login username (default: admin)
-#   EXPECT_PASSWORD  Login password (required)
-#   EXPECT_REBOOT    'y' to reboot after restore, 'n' to skip (default: y)
-#   EXPECT_TIMEOUT   Seconds to wait for each prompt (default: 30)
-#   DEBUG            Set to 'true' to enable expect -d tracing
+#   EXPECT_USERNAME      Login username (default: admin)
+#   EXPECT_PASSWORD      Login password (required)
+#   EXPECT_REBOOT        'y' to reboot after restore, 'n' to skip (default: y)
+#   EXPECT_TIMEOUT       Seconds to wait for each prompt (default: 30)
+#   EXPECT_LOG_LEVEL_NUM Numeric log threshold from the bash LOG_LEVEL
+#                        (TRACE=10 DEBUG=20 INFO=30; default: 30)
+#   DEBUG                Set to 'true' to enable expect -d tracing
+#   LOG_LEVEL            Log verbosity level (read by common-functions)
 
 bindir=$(readlink -f "$(dirname "${0}")")
 export PATH=${bindir}:${PATH}
@@ -54,6 +57,9 @@ config_basename="${3:?need config filename}"
 expect_args=()
 is_true "${DEBUG}" && expect_args+=(-d)
 
+# Compute numeric log level for Tcl if not already provided by the caller.
+_log_level_num="${EXPECT_LOG_LEVEL_NUM:-$(log-level "${LOG_LEVEL:-info}")}"
+
 EXPECT_HOSTNAME="${hostname}" \
 EXPECT_TFTP_HOST="${tftp_host}" \
 EXPECT_CONFIG_BASENAME="${config_basename}" \
@@ -61,7 +67,32 @@ EXPECT_USERNAME="${EXPECT_USERNAME:-admin}" \
 EXPECT_PASSWORD="${EXPECT_PASSWORD:?need EXPECT_PASSWORD}" \
 EXPECT_REBOOT="${EXPECT_REBOOT:-y}" \
 EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
+EXPECT_LOG_LEVEL_NUM="${_log_level_num}" \
+LOGGING_COMMAND_OVERRIDE="set-config-ssh" \
 /usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
+
+    # ── Logging ────────────────────────────────────────────────────────────────
+    #
+    # emit_log LEVEL MESSAGE
+    #   Delegates to the emit-log bash helper which routes through the standard
+    #   logging framework, producing output in the same format as the surrounding
+    #   bash scripts.  The log_level_num gate avoids forking for filtered levels.
+    #   Numeric thresholds: TRACE=10  DEBUG=20  INFO=30  WARN=50  ERROR=60
+
+    set log_level_num [expr {
+        [info exists env(EXPECT_LOG_LEVEL_NUM)] \
+            ? $env(EXPECT_LOG_LEVEL_NUM) \
+            : 30
+    }]
+
+    proc emit_log {level msg} {
+        global log_level_num
+        array set lvl_num {TRACE 10  DEBUG 20  INFO 30  WARN 50  ERROR 60}
+        if {![info exists lvl_num($level)]} { return }
+        if {$lvl_num($level) < $log_level_num} { return }
+        catch {exec emit-log $level $msg 2>@stderr}
+    }
+
     log_user 1
     set match_max 1000000
     set timeout   $env(EXPECT_TIMEOUT)
@@ -79,6 +110,7 @@ EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
     #   hosts file would block automation after any reset.
     # +ssh-rsa: modern OpenSSH disables ssh-rsa by default; the Mokerlink
     #   firmware does not support the newer key exchange algorithms.
+    emit_log DEBUG "connecting to $hostname"
     spawn ssh -F /dev/null -T -o LogLevel=quiet \
         -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null \
@@ -88,10 +120,23 @@ EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
 
     # The firmware presents an application-layer login prompt over the SSH
     # channel and does not support public-key authentication.
-    expect "Username: "
+    emit_log DEBUG "sending credentials for $username"
+    expect {
+        "Username: " { }
+        eof {
+            emit_log ERROR \
+                "SSH connection closed before login prompt — is SSH enabled on the switch?"
+            exit 1
+        }
+        timeout {
+            emit_log ERROR "timed out waiting for SSH login prompt"
+            exit 1
+        }
+    }
     send -- "$username\r"
     expect "Password: "
     send -- "$password\r"
+    emit_log DEBUG "authenticated"
 
     # Wait for privileged exec prompt (#).
     expect "# "
@@ -101,16 +146,17 @@ EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
     expect "# "
 
     # Issue the TFTP config restore command.
+    emit_log INFO "requesting TFTP restore from $tftp"
     send -- "copy tftp://$tftp/$cfgfile startup-config\r"
 
     expect {
         "Do you want to reboot now?" { }
         "Error"  {
-            puts stderr "ERROR: TFTP restore failed"
+            emit_log ERROR "TFTP restore failed"
             exit 1
         }
         timeout  {
-            puts stderr "ERROR: timed out waiting for TFTP restore"
+            emit_log ERROR "timed out waiting for TFTP restore"
             exit 1
         }
     }

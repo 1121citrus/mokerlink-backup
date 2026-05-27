@@ -150,7 +150,18 @@ LOGGING_COMMAND_OVERRIDE="set-config-cmd" \
     # ── Login ──────────────────────────────────────────────────────────────────
 
     emit_log DEBUG "sending credentials for $username"
-    expect "Username: "
+    expect {
+        "Username: " { }
+        eof {
+            emit_log ERROR \
+                "SSH connection closed before login prompt — is SSH enabled on the switch?"
+            exit 1
+        }
+        timeout {
+            emit_log ERROR "timed out waiting for SSH login prompt"
+            exit 1
+        }
+    }
     send -- "$username\r"
     expect "Password: "
     send -- "$password\r"

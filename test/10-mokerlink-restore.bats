@@ -71,11 +71,20 @@ setup() {
         > "${BIN_DIR}/set-config-cmd-serial"
     chmod +x "${BIN_DIR}/set-config-cmd-serial"
 
-    # tftp-serve stub: exits 0 immediately (no server needed in unit tests).
-    printf '%s\n' \
-        '#!/usr/bin/env bash' \
-        'exit 0' \
-        > "${BIN_DIR}/tftp-serve"
+    # tftp-serve stub: sleeps until killed (mimics a real server for the
+    # kill -0 liveness check in start_tftp(); cleanup() sends SIGTERM).
+    # sleep runs in background so the trap fires immediately when bash
+    # receives SIGTERM (a foreground sleep defers the trap until it exits).
+    # Single-quoted heredoc delimiter prevents bash expanding ${_pid} here;
+    # it expands correctly when the stub script runs.
+    cat > "${BIN_DIR}/tftp-serve" <<'__STUB__'
+#!/usr/bin/env bash
+_pid=
+trap 'kill "${_pid}" 2>/dev/null; exit 0' TERM INT
+sleep 300 &
+_pid=$!
+wait
+__STUB__
     chmod +x "${BIN_DIR}/tftp-serve"
 
     # wait-for-restart stub: exits 0 immediately.
