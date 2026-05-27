@@ -218,10 +218,12 @@ function logging-prolog() {
     local include_loc="${LOGGING_INCLUDE_LOCATION:-false}"
 
     # Command name: included when any of ALL, COMMAND, or LOCATION is set.
+    # LOGGING_COMMAND_OVERRIDE lets callers (e.g. emit-log helper called from
+    # Tcl/Expect) supply the logical script name rather than the helper binary.
     local cmd=
     if is-true "${include_all}" || is-true "${include_cmd}" || \
             is-true "${include_loc}"; then
-        cmd="$(basename -- "${0}") "
+        cmd="${LOGGING_COMMAND_OVERRIDE:-$(basename -- "${0}")} "
     fi
 
     # Timestamp: included when ALL or TIMESTAMP is set.
@@ -278,7 +280,7 @@ function validate-log-level() {
         fi
         if is-true "${LOGGING_INCLUDE_ALL:-false}" || \
                 is-true "${LOGGING_INCLUDE_COMMAND:-false}"; then
-            cmd="$(basename -- "${0}") "
+            cmd="${LOGGING_COMMAND_OVERRIDE:-$(basename -- "${0}")} "
         fi
         echo "${date}${cmd}[ERROR] invalid log level: '${level}'" >/dev/stderr
         exit 1

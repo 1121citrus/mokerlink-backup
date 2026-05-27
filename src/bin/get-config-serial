@@ -62,13 +62,16 @@ __get_config_raw__() {
     EXPECT_PASSWORD="${EXPECT_PASSWORD:-admin}" \
     EXPECT_TIMEOUT="${EXPECT_TIMEOUT:-30}" \
     EXPECT_LOG_LEVEL_NUM="${_log_level_num}" \
+    LOGGING_COMMAND_OVERRIDE="get-config-serial" \
     /usr/bin/env expect "${expect_args[@]}" <<-'__END_OF_SCRIPT__'
 
         # ── Logging ────────────────────────────────────────────────────────────
         #
         # emit_log LEVEL MESSAGE
-        #   Writes "[LEVEL] TIMESTAMP get-config-serial MESSAGE" to stderr.
-        #   Suppressed when LEVEL's numeric value is below EXPECT_LOG_LEVEL_NUM.
+        #   Delegates to the emit-log bash helper which routes through the
+        #   standard logging framework, producing output in the same format
+        #   as the surrounding bash scripts.
+        #   The log_level_num gate avoids forking for filtered levels.
 
         set log_level_num [expr {
             [info exists env(EXPECT_LOG_LEVEL_NUM)] \
@@ -81,8 +84,7 @@ __get_config_raw__() {
             array set lvl_num {TRACE 10  DEBUG 20  INFO 30  WARN 50  ERROR 60}
             if {![info exists lvl_num($level)]} { return }
             if {$lvl_num($level) < $log_level_num} { return }
-            set ts [clock format [clock seconds] -format %Y%m%dT%H%M%S]
-            puts stderr "\[$level\] $ts get-config-serial $msg"
+            catch {exec emit-log $level $msg 2>@stderr}
         }
 
         log_user 1
