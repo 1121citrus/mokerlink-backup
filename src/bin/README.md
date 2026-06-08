@@ -9,10 +9,18 @@ Scripts installed to `/usr/local/bin` inside the container image.
 | Script | Role | Entry point |
 | --- | --- | --- |
 | `mokerlink-backup` | **Primary CLI** — downloads switch configs, streams tar or raw text to stdout | user / cron |
+| `mokerlink-restore` | **Restore CLI** — pushes a config file to a switch and reboots it | user |
 | `get-config` | SSH engine — opens an `expect`-driven SSH session and captures one config type | called by `mokerlink-backup` |
 | `get-running-config` | Wrapper: `get-config running "$@"` | backward-compat |
 | `get-startup-config` | Wrapper: `get-config startup "$@"` | backward-compat |
 | `get-backup-config` | Wrapper: `get-config backup "$@"` | backward-compat |
+| `set-config-serial` | Serial engine — expect session over 115200/8N1 console + TFTP restore | called by `mokerlink-restore` |
+| `set-config-http` | HTTP engine — web UI config upload via curl | called by `mokerlink-restore` |
+| `set-config-ssh` | SSH+TFTP engine — expect session over SSH; switch pulls config via TFTP | called by `mokerlink-restore` |
+| `set-config-cmd` | SSH command-stream engine — replays parsed config commands over SSH | called by `mokerlink-restore` |
+| `cfg-to-commands` | Config parser — translates `.cfg` format to interactive CLI command stream | called by `set-config-cmd` |
+| `tftp-serve` | One-shot TFTP server — serves a single file then exits | called by `mokerlink-restore` |
+| `wait-for-restart` | Restart monitor — polls TCP until the switch responds after reboot | called by `mokerlink-restore` |
 | `backup` | Legacy service script — fetches all configs, compresses, encrypts, uploads to S3 | cron (via `startup`) |
 | `startup` | Container entrypoint — writes `.env`, installs crontab, hands off to `crond` | `CMD` in Dockerfile |
 | `healthcheck` | Docker `HEALTHCHECK` — verifies `crond` is running and the crontab is configured | Docker daemon |

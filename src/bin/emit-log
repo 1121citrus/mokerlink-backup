@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+# Emit one log line through the standard bash logging framework.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   emit-log LEVEL MESSAGE...
+#
+# DESCRIPTION
+#   Sources common-functions and calls log() so that Tcl/Expect
+#   emit_log procs produce output in the same format as the surrounding
+#   bash scripts.  The ERROR level is logged without calling exit so that
+#   the Tcl caller retains control of the session lifetime.
+#
+# ENVIRONMENT
+#   LOG_LEVEL                Inherited log threshold from the bash wrapper.
+#   LOGGING_COMMAND_OVERRIDE Override the command name in the log prolog
+#                            (set by the bash wrapper to the Tcl script name
+#                            so the prolog shows the right command when
+#                            LOGGING_INCLUDE_COMMAND or LOGGING_INCLUDE_ALL
+#                            is enabled).
+#   LOGGING_INCLUDE_*        Standard framework formatting flags.
+
+bindir=$(readlink -f "$(dirname "${0}")")
+
+# shellcheck disable=SC1090,SC1091
+source "${bindir}/../common-functions" 2>/dev/null \
+    || source /usr/local/include/bash/common-functions
+
+level="${1:-INFO}"
+shift
+
+# Use log() directly (not error()) so ERROR-level messages from Tcl do not
+# exit this helper — the Tcl script manages its own session lifecycle.
+log "${level}" "${@:-}"

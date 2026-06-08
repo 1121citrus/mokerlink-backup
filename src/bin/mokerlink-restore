@@ -1,0 +1,634 @@
+#!/usr/bin/env bash
+
+# Push a configuration file to a Mokerlink managed network switch.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   mokerlink-restore --transport TRANSPORT --config FILE [options]
+#
+# DESCRIPTION
+#   Pushes a configuration file to a Mokerlink switch using the selected
+#   transport mechanism, then optionally reboots the switch and waits for
+#   it to come back up.
+#
+# OPTIONS
+#   -h,-?,--help           Display this help text
+#   -v,--version           Display command version
+#   -t,--transport TRANS   Transport: serial, http, ssh, ssh-cmd (required)
+#   -c,--config FILE       Config file to push (required)
+#   -H,--host HOST         Switch IP or hostname
+#                          (env: MOKERLINK_HOST; default: 192.168.2.1)
+#      --port PORT         Serial device path (serial transport only;
+#                          default: auto-detect /dev/cu.usbserial-* or
+#                          /dev/ttyUSB0)
+#      --tftp-host IP      Local IP the TFTP server listens on and the
+#                          switch is told to pull from (serial and ssh
+#                          transports; env: TFTP_HOST; default:
+#                          auto-detect 192.168.2.x address)
+#   -u,--user USER         Login username (default: admin)
+#   -p,--password PW       Password (env: MOKERLINK_PASSWORD;
+#                          serial default: 'admin')
+#   -P,--password-file FILE
+#                          Password file (env: MOKERLINK_PASSWORD_FILE;
+#                          default: /run/secrets/mokerlink-password)
+#   -l,--log-level LEVEL   Log verbosity: trace|debug|info|warn|error
+#                          (env: LOG_LEVEL; default: info)
+#      --dry-run           Show what would be done without executing
+#      --no-reboot         Push config but do not reboot the switch
+#      --wait              Wait for switch to respond after reboot
+#                          (default: on for serial and http transports)
+#      --no-wait           Return immediately after triggering reboot
+#
+# ENVIRONMENT
+#   MOKERLINK_HOST         Switch hostname or IP (default: 192.168.2.1)
+#   MOKERLINK_PASSWORD     Switch login password
+#   MOKERLINK_PASSWORD_FILE
+#                          Path to password file
+#                          (default: /run/secrets/mokerlink-password)
+#   TFTP_HOST              Local IP for TFTP (overridden by --tftp-host)
+#   LOG_LEVEL              Log verbosity level (default: info)
+#   DEBUG                  Enable bash trace output (default: false)
+#   ENV                    Env-file path (default: ~/.env)
+#
+# EXAMPLES
+#   # Bootstrap a factory-reset switch over the serial console:
+#   sudo mokerlink-restore --transport serial --config start-config.cfg
+#
+#   # Push a config update over HTTP (Ethernet cable only, no serial):
+#   mokerlink-restore --transport http --config start-config.cfg
+#
+#   # Update a running SSH-enabled switch without a TFTP server:
+#   mokerlink-restore --transport ssh-cmd --config start-config.cfg \
+#       --host switch-1 \
+#       --password-file /run/secrets/mokerlink-password
+
+command=$(basename "${0}")
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# Prefer common-functions from the source tree (one dir up from bindir) so
+# these scripts can be invoked natively on macOS without a Docker container.
+# Falls back to the installed path used inside the Docker image.
+# shellcheck disable=SC1090,SC1091
+source "${bindir}/../common-functions" 2>/dev/null \
+    || source /usr/local/include/bash/common-functions
+
+ENV=${ENV:-${HOME:-/root}/.env}
+set -o errexit -o errtrace -o nounset -o pipefail
+# shellcheck disable=SC1090
+[[ -r "${ENV}" ]] && source "${ENV}"
+is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+
+# Print usage to stdout.
+# Args: None
+# Returns: 0
+show_help() {
+    cat <<'EOF'
+Usage: mokerlink-restore --transport TRANSPORT --config FILE [options]
+
+Push a configuration file to a Mokerlink switch and reboot it.
+
+Options:
+  -h,-?,--help           Display this help text
+  -v,--version           Display command version
+  -t,--transport TRANS   Transport: serial-cmd, serial, http, ssh, ssh-cmd
+                         (required)
+  -c,--config FILE       Configuration file to push (required)
+  -H,--host HOST         Switch IP or hostname (default: 192.168.2.1)
+     --port PORT         Serial device path (serial/serial-cmd transports;
+                         default: auto-detect)
+     --tftp-host IP      Local IP the TFTP server binds to and the switch
+                         pulls from (serial and ssh transports;
+                         env: TFTP_HOST; default: auto-detect)
+  -u,--user USER         Login username (default: admin)
+  -p,--password PW       Password (env: MOKERLINK_PASSWORD)
+  -P,--password-file FILE
+                         Password file (env: MOKERLINK_PASSWORD_FILE;
+                         default: /run/secrets/mokerlink-password)
+  -l,--log-level LEVEL   Log verbosity: trace|debug|info|warn|error
+                         (env: LOG_LEVEL; default: info)
+     --dry-run           Show what would be done without connecting
+     --no-reboot         Push config but do not reboot the switch
+     --wait              Wait for switch to respond after reboot
+     --no-wait           Return immediately after triggering reboot
+
+Transports:
+  serial-cmd  Serial console (115200/8N1) with per-command config replay.
+              No TFTP server required; no sudo needed.
+              Works on factory-reset switches where SSH is disabled and
+              the firmware rejects TFTP text-format configs.
+              Recommended for bootstrap and restore.
+  serial      Serial console (115200/8N1) + TFTP file transfer.
+              Requires sudo (TFTP port 69).  Use serial-cmd instead if
+              the firmware rejects text-format configs via TFTP.
+  http        Web UI config upload over HTTP.
+              Requires only an Ethernet cable; no serial adapter needed.
+  ssh         SSH session + TFTP file transfer.
+              Requires SSH to be enabled (not the factory default).
+  ssh-cmd     SSH session with per-command config replay; no TFTP needed.
+              Requires SSH to be enabled (not the factory default).
+
+Examples:
+  # Bootstrap a factory-reset switch over serial (recommended):
+  bash mokerlink-restore --transport serial-cmd --config start-config.cfg
+
+  # Update a running switch over HTTP:
+  mokerlink-restore --transport http --config start-config.cfg
+
+  # Update a running switch over SSH without a TFTP server:
+  mokerlink-restore --transport ssh-cmd --config start-config.cfg \
+      --host switch-1 --password-file /run/secrets/mokerlink-password
+EOF
+}
+
+# Print the installed version to stdout.
+# Args: None
+# Returns: 0
+show_version() {
+    cat /usr/local/share/mokerlink-backup/version 2>/dev/null \
+        || echo "unknown"
+}
+
+# ── Defaults ──────────────────────────────────────────────────────────────────
+
+transport=
+config_file=
+host="${MOKERLINK_HOST:-192.168.2.1}"
+serial_port=
+# --tftp-host flag takes precedence; TFTP_HOST env var is the fallback.
+tftp_host_override="${TFTP_HOST:-}"
+user="admin"
+password="${MOKERLINK_PASSWORD:-}"
+password_file="${MOKERLINK_PASSWORD_FILE:-/run/secrets/mokerlink-password}"
+do_reboot=true
+dry_run=false
+# wait_for_restart: empty = use transport default; true/false = explicit.
+wait_for_restart=
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|-\?|--help)
+            show_help
+            exit 0
+            ;;
+        -v|--version)
+            show_version
+            exit 0
+            ;;
+        -t|--transport)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            transport="$2"
+            shift
+            ;;
+        -c|--config)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            config_file="$2"
+            shift
+            ;;
+        -H|--host)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            host="$2"
+            shift
+            ;;
+        --port)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            serial_port="$2"
+            shift
+            ;;
+        --tftp-host)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            tftp_host_override="$2"
+            shift
+            ;;
+        -u|--user)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            user="$2"
+            shift
+            ;;
+        -p|--password)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            password="$2"
+            shift
+            ;;
+        -P|--password-file)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            password_file="$2"
+            shift
+            ;;
+        -l|--log-level)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            LOG_LEVEL="$2"
+            export LOG_LEVEL
+            shift
+            ;;
+        --dry-run)
+            dry_run=true
+            ;;
+        --no-reboot)
+            do_reboot=false
+            ;;
+        --wait)
+            wait_for_restart=true
+            ;;
+        --no-wait)
+            wait_for_restart=false
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            error "unknown option: '${1}'"
+            ;;
+        *)
+            error "unexpected argument: '${1}'"
+            ;;
+    esac
+    shift
+done
+
+# ── Validation ────────────────────────────────────────────────────────────────
+
+validate-log-level "${LOG_LEVEL:-info}"
+
+[[ -n "${transport}" ]] || \
+    error "transport is required (--transport serial|http|ssh|ssh-cmd)"
+
+case "${transport}" in
+    serial-cmd|serial|http|ssh|ssh-cmd) ;;
+    *) error "unknown transport: '${transport}' \
+(expected: serial-cmd, serial, http, ssh, or ssh-cmd)" ;;
+esac
+
+[[ -n "${config_file}" ]] || \
+    error "config file is required (--config FILE)"
+[[ -f "${config_file}" ]] || \
+    error "config file not found: '${config_file}'"
+[[ -n "${host}" ]] || \
+    error "host is required (--host HOST or MOKERLINK_HOST)"
+
+# SSH transports require an explicit password; serial defaults to 'admin'.
+if [[ "${transport}" == "ssh" || "${transport}" == "ssh-cmd" ]]; then
+    if [[ -z "${password}" ]] && [[ -r "${password_file}" ]]; then
+        password=$(cat "${password_file}")
+    fi
+    [[ -n "${password}" ]] || \
+        error 'need MOKERLINK_PASSWORD, --password, or --password-file \
+(default: /run/secrets/mokerlink-password)'
+fi
+
+# Serial transport: auto-detect port when --port not given.
+if [[ "${transport}" == "serial" || "${transport}" == "serial-cmd" ]] \
+        && [[ -z "${serial_port}" ]]; then
+    for _candidate in \
+            /dev/cu.usbserial-* \
+            /dev/ttyUSB0 \
+            /dev/ttyACM0; do
+        if [[ -c "${_candidate}" ]]; then
+            serial_port="${_candidate}"
+            info "auto-detected serial port: ${serial_port}"
+            break
+        fi
+    done
+    if [[ -z "${serial_port}" ]]; then
+        if is_true "${dry_run}"; then
+            serial_port="(dry-run/no-port)"
+        else
+            error "no serial port found; specify with --port \
+(tried /dev/cu.usbserial-*, /dev/ttyUSB0, /dev/ttyACM0)"
+        fi
+    fi
+fi
+
+# Serial bootstrap: fall back to factory default password when none supplied.
+if [[ "${transport}" == "serial" || "${transport}" == "serial-cmd" ]] \
+        && [[ -z "${password}" ]]; then
+    if [[ -r "${password_file}" ]]; then
+        password=$(cat "${password_file}")
+    else
+        password="admin"
+        info "no password provided; using factory default 'admin'"
+    fi
+fi
+
+# Apply transport-specific default for wait_for_restart.
+if [[ -z "${wait_for_restart}" ]]; then
+    case "${transport}" in
+        serial-cmd|serial|http) wait_for_restart=true ;;
+        ssh|ssh-cmd) wait_for_restart=false ;;
+    esac
+fi
+
+# ── Dispatch ──────────────────────────────────────────────────────────────────
+
+info "begin transport=${transport} host=${host} config=${config_file}"
+
+config_basename=$(basename "${config_file}")
+tftp_pid=
+crlf_dir=
+
+# Stop the TFTP server (if started) on any exit.
+cleanup() {
+    if [[ -n "${tftp_pid:-}" ]]; then
+        # tftp-serve manages its own cleanup; sending SIGTERM is enough.
+        kill "${tftp_pid}" 2>/dev/null || true
+        wait "${tftp_pid}" 2>/dev/null || true
+    fi
+    [[ -z "${crlf_dir:-}" ]] || rm -rf "${crlf_dir}"
+}
+trap cleanup EXIT
+
+# Start a TFTP server in the background (serial and ssh transports).
+# Prints the PID to tftp_pid so cleanup() can stop it on exit.
+#
+# The switch firmware validates config files and requires CRLF line endings.
+# Captures from get-config-serial produce LF-only (expect normalises on
+# output).  Normalise to CRLF before serving so the firmware accepts the file.
+start_tftp() {
+    local tftp_host="${1:?need TFTP host}"
+    crlf_dir=$(mktemp -d)
+    tr -d '\r' < "${config_file}" \
+        | awk '{ printf "%s\r\n", $0 }' \
+        > "${crlf_dir}/${config_basename}"
+    debug "starting TFTP server to serve ${config_basename}"
+    bash "${bindir}/tftp-serve" \
+        --file "${crlf_dir}/${config_basename}" &
+    tftp_pid=$!
+    # Give the server a moment to open the port before the switch connects.
+    sleep 2
+    # Verify the server is still alive.  On macOS, port 69 requires root;
+    # if tftp-serve exited early, give a clear error rather than letting the
+    # switch time out on a TFTP connection that was never established.
+    kill -0 "${tftp_pid}" 2>/dev/null || \
+        error "TFTP server failed to start — on macOS re-run with sudo; \
+on Linux ensure port 69 is available (may need sudo)"
+}
+
+# Compute numeric log level for Tcl once here; used by any transport branch
+# that invokes an Expect child (serial-cmd, ssh-cmd).  Must precede the case
+# statement so every branch can reference it without recomputing.
+_log_level_num=$(log-level "${LOG_LEVEL:-info}")
+
+case "${transport}" in
+    serial-cmd)
+        # Parse the config file into an interactive CLI command stream,
+        # write it to a temp file, then drive set-config-cmd-serial.
+        # No TFTP server required; no sudo needed.
+        commands_file=$(mktemp)
+        trap 'rm -f "${commands_file}"' EXIT
+        bash "${bindir}/cfg-to-commands" "${config_file}" \
+            > "${commands_file}"
+
+        is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
+
+        if is_true "${dry_run}"; then
+            # Walk the command file and emit section-transition INFO messages
+            # using the same first-word dispatch as set-config-cmd-serial.
+            # This gives the user the same phase-level progress view they
+            # would see in a real run without touching any hardware.
+            _section=""
+            _in_block=0
+            _cmd_count=0
+            while IFS= read -r _cmd; do
+                # Strip leading/trailing whitespace
+                _t="${_cmd#"${_cmd%%[![:space:]]*}"}"
+                _t="${_t%"${_t##*[![:space:]]}"}"
+                [[ -z "${_t}" ]] && continue
+                (( _cmd_count++ )) || true
+                _word="${_t%% *}"
+
+                if (( _in_block == 0 )); then
+                    case "${_word}" in
+                        configure)     _ns=startup ;;
+                        vlan)          _ns=vlans ;;
+                        interface)     _ns=interfaces ;;
+                        spanning-tree) _ns=spanning_tree ;;
+                        line)          _ns=access ;;
+                        end)           _ns=commit ;;
+                        save)          _ns=save ;;
+                        *)             _ns=global ;;
+                    esac
+                    if [[ "${_ns}" != "global" && "${_ns}" != "${_section}" ]]; then
+                        _section="${_ns}"
+                        case "${_section}" in
+                            startup)       _label="entering configuration mode" ;;
+                            vlans)         _label="loading VLAN topology" ;;
+                            interfaces)    _label="assigning interface roles" ;;
+                            spanning_tree) _label="configuring spanning tree" ;;
+                            access)        _label="configuring line access" ;;
+                            commit)        _label="committing configuration" ;;
+                            save)          _label="saving to startup-config" ;;
+                            *)             _label="" ;;
+                        esac
+                        [[ -n "${_label}" ]] && info "dry-run: ${_label}"
+                    fi
+                fi
+
+                # Track block depth to suppress section detection inside blocks.
+                case "${_word}" in
+                    exit)          _in_block=0 ;;
+                    vlan|interface|spanning-tree|router|line) _in_block=1 ;;
+                esac
+
+                log-level-enabled DEBUG && debug "  ${_t}"
+            done < "${commands_file}"
+            info "dry-run: would send ${_cmd_count} commands to ${serial_port}"
+        else
+            info "starting serial command-stream restore on ${serial_port}"
+            EXPECT_USERNAME="${user}" \
+            EXPECT_PASSWORD="${password}" \
+            EXPECT_REBOOT="${_reboot_flag}" \
+            EXPECT_LOG_LEVEL_NUM="${_log_level_num}" \
+                bash "${bindir}/set-config-cmd-serial" \
+                    "${serial_port}" \
+                    "${commands_file}"
+        fi
+        ;;
+    serial)
+        # Determine the bootstrap host IP on the directly-connected interface.
+        # The switch is at 192.168.2.1; the host must be in 192.168.2.x/24.
+        # --tftp-host (or TFTP_HOST env var) overrides auto-detection.
+        # Skip detection for dry-run to avoid the TFTP/sudo requirement.
+        if ! is_true "${dry_run}"; then
+            if [[ -n "${tftp_host_override}" ]]; then
+                tftp_host="${tftp_host_override}"
+            else
+                # Portable IP detection: combine ip(1) (Linux) and ifconfig(8)
+                # (macOS/Linux); grep -oP is not available on macOS BSD grep.
+                tftp_host=$(
+                    { ip -4 addr show 2>/dev/null; \
+                      ifconfig 2>/dev/null; } \
+                    | grep -oE '\binet 192\.168\.2\.[0-9]+' \
+                    | sed 's/^inet //' \
+                    | sort -u \
+                    | grep -v '^192\.168\.2\.1$' \
+                    | head -1 || true
+                )
+                if [[ -z "${tftp_host}" ]]; then
+                    # macOS fallback: find the interface with a route to the
+                    # switch's factory-default IP (192.168.2.1), not the
+                    # default-gateway interface which may be on a different subnet.
+                    tftp_host=$(route -n get 192.168.2.1 2>/dev/null \
+                        | awk '/interface:/{print $2}' \
+                        | xargs -I{} ipconfig getifaddr {} 2>/dev/null \
+                        || true)
+                fi
+                [[ -n "${tftp_host}" ]] || \
+                    error "cannot determine local IP for TFTP; \
+use --tftp-host IP or ensure a 192.168.2.x address is configured"
+            fi
+        fi
+
+        # Convert do_reboot (true/false) to y/n for the expect script.
+        is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
+
+        if is_true "${dry_run}"; then
+            info "dry-run: would start TFTP server on <auto-detected 192.168.2.x>"
+            info "dry-run: would push ${config_basename} to switch via serial+TFTP"
+            info "dry-run: would reboot=${_reboot_flag}"
+        else
+            start_tftp "${tftp_host}"
+            info "starting serial restore on ${serial_port}"
+            EXPECT_USERNAME="${user}" \
+            EXPECT_PASSWORD="${password}" \
+            EXPECT_REBOOT="${_reboot_flag}" \
+                bash "${bindir}/set-config-serial" \
+                    "${serial_port}" \
+                    "${tftp_host}" \
+                    "${config_basename}"
+        fi
+        ;;
+    http)
+        error "http transport not yet implemented"
+        ;;
+    ssh)
+        # Skip TFTP-host detection for dry-run to avoid the sudo requirement.
+        if ! is_true "${dry_run}"; then
+            if [[ -n "${tftp_host_override}" ]]; then
+                tftp_host="${tftp_host_override}"
+            else
+                # Portable IP detection: combine ip(1) (Linux) and ifconfig(8)
+                # (macOS/Linux); grep -oP is not available on macOS BSD grep.
+                tftp_host=$(
+                    { ip -4 addr show 2>/dev/null; \
+                      ifconfig 2>/dev/null; } \
+                    | grep -oE '\binet [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
+                    | sed 's/^inet //' \
+                    | sort -u \
+                    | grep -v "^${host}$" \
+                    | grep -v '^127\.' \
+                    | head -1 || true
+                )
+                if [[ -z "${tftp_host}" ]]; then
+                    # macOS fallback: find the interface with a route to the
+                    # switch ($host), not the default-gateway interface which
+                    # may be on a different subnet.
+                    tftp_host=$(route -n get "${host}" 2>/dev/null \
+                        | awk '/interface:/{print $2}' \
+                        | xargs -I{} ipconfig getifaddr {} 2>/dev/null \
+                        || true)
+                fi
+                [[ -n "${tftp_host}" ]] || \
+                    error "cannot determine local IP for TFTP; use --tftp-host IP"
+            fi
+        fi
+
+        is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
+
+        if is_true "${dry_run}"; then
+            info "dry-run: would start TFTP server on <auto-detected local IP>"
+            info "dry-run: would upload ${config_basename} to ${host} via TFTP"
+            info "dry-run: would reboot=${_reboot_flag}"
+        else
+            start_tftp "${tftp_host}"
+            info "starting SSH+TFTP restore to ${host}"
+            EXPECT_USERNAME="${user}" \
+            EXPECT_PASSWORD="${password}" \
+            EXPECT_REBOOT="${_reboot_flag}" \
+                bash "${bindir}/set-config-ssh" \
+                    "${host}" \
+                    "${tftp_host}" \
+                    "${config_basename}"
+        fi
+        ;;
+    ssh-cmd)
+        # Parse the config file into an interactive CLI command stream,
+        # write it to a temp file, then drive set-config-cmd over SSH.
+        commands_file=$(mktemp)
+        trap 'rm -f "${commands_file}"' EXIT
+        bash "${bindir}/cfg-to-commands" "${config_file}" \
+            > "${commands_file}"
+
+        is_true "${do_reboot}" && _reboot_flag=y || _reboot_flag=n
+
+        info "starting SSH command-stream restore to ${host}"
+        if is_true "${dry_run}"; then
+            # Walk the command file and emit section-transition INFO messages
+            # using the same first-word dispatch as set-config-cmd.
+            _section=""
+            _in_block=0
+            _cmd_count=0
+            while IFS= read -r _cmd; do
+                _t="${_cmd#"${_cmd%%[![:space:]]*}"}"
+                _t="${_t%"${_t##*[![:space:]]}"}"
+                [[ -z "${_t}" ]] && continue
+                (( _cmd_count++ )) || true
+                _word="${_t%% *}"
+                if (( _in_block == 0 )); then
+                    case "${_word}" in
+                        configure)     _ns=startup ;;
+                        vlan)          _ns=vlans ;;
+                        interface)     _ns=interfaces ;;
+                        spanning-tree) _ns=spanning_tree ;;
+                        line)          _ns=access ;;
+                        end)           _ns=commit ;;
+                        save)          _ns=save ;;
+                        *)             _ns=global ;;
+                    esac
+                    if [[ "${_ns}" != "global" && "${_ns}" != "${_section}" ]]; then
+                        _section="${_ns}"
+                        case "${_section}" in
+                            startup)       _label="entering configuration mode" ;;
+                            vlans)         _label="loading VLAN topology" ;;
+                            interfaces)    _label="assigning interface roles" ;;
+                            spanning_tree) _label="configuring spanning tree" ;;
+                            access)        _label="configuring line access" ;;
+                            commit)        _label="committing configuration" ;;
+                            save)          _label="saving to startup-config" ;;
+                            *)             _label="" ;;
+                        esac
+                        [[ -n "${_label}" ]] && info "dry-run: ${_label}"
+                    fi
+                fi
+                case "${_word}" in
+                    exit)                                       _in_block=0 ;;
+                    vlan|interface|spanning-tree|router|line)   _in_block=1 ;;
+                esac
+                log-level-enabled DEBUG && debug "  ${_t}"
+            done < "${commands_file}"
+            info "dry-run: would send ${_cmd_count} commands to ${host}"
+        else
+            EXPECT_USERNAME="${user}" \
+            EXPECT_PASSWORD="${password}" \
+            EXPECT_REBOOT="${_reboot_flag}" \
+            EXPECT_LOG_LEVEL_NUM="${_log_level_num}" \
+                bash "${bindir}/set-config-cmd" \
+                    "${host}" \
+                    "${commands_file}"
+        fi
+        ;;
+esac
+
+if is_true "${do_reboot}" && is_true "${wait_for_restart}" \
+        && ! is_true "${dry_run}"; then
+    info "waiting for ${host} to come back up"
+    bash "${bindir}/wait-for-restart" \
+        --host "${host}" \
+        --port 80
+fi
+
+info "finish ${command}"

@@ -1,215 +1,169 @@
-# 1121citrus/mokerlink-backup
+# mokerlink-backup
 
-A CLI tool to download configuration backups from a [Mokerlink managed network switch](https://www.mokerlink.com/index.php?route=product/product&product_id=396).
+`mokerlink-backup` and `mokerlink-restore` are two CLIs packaged in the
+`1121citrus/mokerlink-backup` Docker image.  Together they cover the full
+backup/restore lifecycle for a
+[Mokerlink managed network switch](https://www.mokerlink.com/index.php?route=product/product&product_id=396).
+
+**Backup** downloads the running, startup, and backup configurations from the
+switch via SSH and streams them to stdout as a tar archive or raw text.
+Backup runs as a one-shot CLI command or on a recurring schedule using a
+built-in cron service.
+
+**Restore** pushes a saved configuration file back to a switch and reboots
+it.  Four transport mechanisms are available — serial command replay,
+serial+TFTP, SSH+TFTP, and SSH command replay — covering both
+factory-reset switches (where SSH is not yet enabled) and fully running
+switches.
 
 ## Contents
 
-- [Contents](#contents)
-- [Synopsis](#synopsis)
-- [CLI Usage](#cli-usage)
-- [Examples](#examples)
-  - [Download all configurations as a tarball](#download-all-configurations-as-a-tarball)
-  - [Print the running configuration to stdout](#print-the-running-configuration-to-stdout)
-  - [Selective download](#selective-download)
-- [Legacy Service Mode](#legacy-service-mode)
-  - [Run as a periodic cron job](#run-as-a-periodic-cron-job)
-  - [Run a one-off backup to S3](#run-a-one-off-backup-to-s3)
-  - [Docker Compose example](#docker-compose-example)
+- [Setup](#setup)
+  - [Prerequisites](#prerequisites)
+  - [Shell functions](#shell-functions)
+  - [Secrets](#secrets)
+- [Backup](#backup)
+  - [One-shot backup](#one-shot-backup)
+  - [Scheduled backup (cron service)](#scheduled-backup-cron-service)
   - [Verify a backup](#verify-a-backup)
-- [Configuration](#configuration)
-  - [CLI parameters](#cli-parameters)
-  - [Legacy service parameters](#legacy-service-parameters)
-- [Building](#building)
-- [Security](#security)
+  - [Serial backup](#serial-backup)
+- [Restore](#restore)
+  - [Transports](#transports)
+  - [Restore a running switch (SSH)](#restore-a-running-switch-ssh)
+  - [Restore a factory-reset switch](#restore-a-factory-reset-switch)
+- [Hardware swap — restore from factory reset](#hardware-swap--restore-from-factory-reset)
+  - [Prerequisites](#prerequisites-1)
+  - [Phase 1 — Prepare before touching any cables](#phase-1--prepare-before-touching-any-cables)
+  - [Phase 2 — Bootstrap the replacement switch](#phase-2--bootstrap-the-replacement-switch)
+  - [Phase 3 — Transfer cables](#phase-3--transfer-cables)
+  - [Phase 4 — Cutover](#phase-4--cutover)
+  - [Phase 5 — Verify](#phase-5--verify)
+  - [Rollback](#rollback)
+  - [Troubleshooting the swap](#troubleshooting-the-swap)
+    - [ARP flush did not restore connectivity](#arp-flush-did-not-restore-connectivity)
+- [Reference](#reference)
+  - [mokerlink-backup CLI](#mokerlink-backup-cli)
+  - [mokerlink-restore CLI](#mokerlink-restore-cli)
+  - [Scheduled backup parameters](#scheduled-backup-parameters)
+  - [Building](#building)
+  - [Security](#security)
 
-## Synopsis
+---
 
-`mokerlink-backup` downloads the running, startup, and/or backup configurations
-from a [Mokerlink managed network switch](https://www.mokerlink.com/index.php?route=product/product&product_id=396)
-and streams them to stdout as a tar archive or raw text.  The script uses the
-[Cisco-inspired CLI](https://www.mokerlink.com/index.php?route=product/product/download&download_id=20)
-over SSH.
+## Setup
 
-A backup user must be provisioned on the switch with `Admin` privileges.
-Firewall rules must allow the container to reach the switch's SSH port (22/tcp).
+### Prerequisites
 
-## CLI Usage
+- Docker installed and running on the host machine
+- A dedicated backup user provisioned on the switch with `Admin` privileges
+  (required for backup and SSH-based restore)
+- Firewall rules that allow the host to reach the switch on port 22/TCP
 
-```text
-mokerlink-backup [options]
+### Shell functions
 
-Download a backup of a Mokerlink managed network switch.
+The CLIs are not installed on your host — they run inside the Docker image.
+Define these shell functions (paste into `~/.bashrc` or `~/.zshrc`) so
+every example in this document works as written from the directory that
+contains your `secrets/` folder.
 
-Options:
-  -?,--help              Display this help text
-  -v,--version           Display command version
-  -a,--all               Include all configurations (default)
-  -r,--running           Include running configuration
-     --no-running        Exclude running configuration
-  -s,--startup           Include startup configuration
-     --no-startup        Exclude startup configuration
-  -b,--backup            Include backup configuration
-     --no-backup         Exclude backup configuration
-  -f,--format FMT        Output format: 'raw' or 'tar'
-                         (env: MOKERLINK_FORMAT; default: 'tar')
-  -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST)
-  -u,--user USER         SSH username (env: MOKERLINK_USER;
-                         default: remote-backup)
-  -p,--password PW       Password (env: MOKERLINK_PASSWORD)
-  -P,--password-file FILE
-                         Password file (env: MOKERLINK_PASSWORD_FILE;
-                         default: /run/secrets/mokerlink-password)
+```bash
+# Download switch configuration to a tar archive or stdout.
+mokerlink-backup() {
+    docker run --rm \
+        --volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro" \
+        1121citrus/mokerlink-backup:latest \
+        mokerlink-backup "$@"
+}
+
+# Restore switch configuration — ssh-cmd transport only.
+# Serial and ssh transports require host networking or sudo; see the
+# "Restore a factory-reset switch" section for those invocations.
+mokerlink-restore() {
+    docker run --rm \
+        --volume "$(pwd):/work" --workdir /work \
+        --volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro" \
+        1121citrus/mokerlink-backup:latest \
+        mokerlink-restore "$@"
+}
 ```
 
-Connection parameters may also be supplied via environment variables (see
-[CLI parameters](#cli-parameters) below).
+### Secrets
 
-> **Note on `-h`:** There is no `-h` flag — `-H` (uppercase) is the host option.
-> Use `-?` or `--help` to display help text.
+Both CLIs read credentials from files in a `secrets/` directory relative to
+the current working directory.  Create the directory and populate the files
+before running any command.
 
-## Examples
-
-### Download all configurations as a tarball
+**Switch password** — required for all backup operations and SSH-based
+restore.  The file must contain only the password, with no trailing newline:
 
 ```console
-$ docker run --rm \
-      -v ./secrets/mokerlink-password:/run/secrets/mokerlink-password:ro \
-      1121citrus/mokerlink-backup:latest \
-      mokerlink-backup --host switch --user backup-user > switch-backup.tar
+$ mkdir -p secrets
+$ printf '%s' 'your-switch-password' > secrets/mokerlink-password
 ```
 
-Or using environment variables:
+**AWS credentials** — required only for S3 uploads (scheduled backup).
+Follow the [AWS CLI configuration guide](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html)
+and write the result to `secrets/aws-config`.
+
+**GPG passphrase** — required only for encrypted backups.  The file must
+contain only the passphrase, with no trailing newline:
 
 ```console
-$ docker run --rm \
-      -e MOKERLINK_HOST=switch \
-      -e MOKERLINK_USER=backup-user \
-      -v ./secrets/mokerlink-password:/run/secrets/mokerlink-password:ro \
-      1121citrus/mokerlink-backup:latest \
-      mokerlink-backup > switch-backup.tar
-```
-
-### Print the running configuration to stdout
-
-```console
-$ docker run --rm \
-      -v ./secrets/mokerlink-password:/run/secrets/mokerlink-password:ro \
-      1121citrus/mokerlink-backup:latest \
-      mokerlink-backup --host switch --user backup-user --running --format raw
-SYSTEM CONFIG FILE ::= BEGIN
-! System Description: KT-NOS POE-G244GSM Switch
-! System Version: v1.0.0.27
-! System Name: switch
-! System Up Time: 0 days, 23 hours, 9 mins, 34 secs
-!
-    .
-    .
-    .
-```
-
-### Selective download
-
-Include only running and startup configs (exclude backup):
-
-```console
-mokerlink-backup --host switch -u backup-user -P pw-file --running --startup > partial.tar
-```
-
-Include all except startup:
-
-```console
-mokerlink-backup --host switch -u backup-user -P pw-file --no-startup > partial.tar
+$ printf '%s' 'your-gpg-passphrase' > secrets/gpg-passphrase
 ```
 
 ---
 
-## Legacy Service Mode
+## Backup
 
-The image can also run as a Docker Compose service to periodically perform
-backups and transfer them to S3.  This behavior is retained for backward
-compatibility.
+Both backup modes connect to the switch over SSH.  The switch must be
+reachable on port 22, and the backup user must be configured.
 
-> A future refactoring will replace the cron service role with a dedicated
-> scheduler (e.g. [willfarrell/docker-crontab](https://github.com/willfarrell/docker-crontab)
-> or [mcuadros/ofelia](https://github.com/mcuadros/ofelia)) that invokes
-> `mokerlink-backup` directly.  Once that is done the legacy `backup`,
-> `startup`, and `healthcheck` scripts — and the S3/GPG dependencies — can
-> be removed, greatly reducing the attack surface.
+For offline or recovery scenarios where SSH is unavailable, see
+[Serial backup](#serial-backup) below.
 
-### Run as a periodic cron job
+### One-shot backup
+
+Download all configurations as a tar archive:
 
 ```console
-$ docker run -i --rm \
-      -e AWS_S3_BUCKET_NAME=backups-bucket \
-      -e COMPRESSION=bzip2 \
-      -e CRON_EXPRESSION='*/15 * * * *' \
-      -e MOKERLINK_HOST=switch \
-      -e MOKERLINK_USER=remote-backup \
-      -v ./secrets/aws-config:/run/secrets/aws-config:ro \
-      -v ./secrets/mokerlink-password:/run/secrets/mokerlink-password:ro \
-      -v ./secrets/gpg-passphrase:/run/secrets/gpg-passphrase:ro \
-      -v /etc/localtime:/etc/localtime:ro \
-      1121citrus/mokerlink-backup:latest
+$ mokerlink-backup --host switch-1 --user backup-user > switch-1-backup.tar
 ```
 
-Example log output:
+Print the running configuration to stdout as plain text:
 
 ```console
-[INFO] 20250922T120714 startup create env file /root/.env
-[INFO] 20250922T120714 startup export AWS_CONFIG_FILE='/run/secrets/aws-config'
-[INFO] 20250922T120714 startup export AWS_DRYRUN='false'
-[INFO] 20250922T120714 startup export AWS_S3_BUCKET_NAME='backups-bucket'
-[INFO] 20250922T120714 startup export COMPRESSION='bzip2'
-[INFO] 20250922T120714 startup export CRON_EXPRESSION='*/15 * * * *'
-[INFO] 20250922T120714 startup export DEBUG='false'
-[INFO] 20250922T120714 startup export GPG_CIPHER_ALGO='aes256'
-[INFO] 20250922T120714 startup export GPG_PASSPHRASE='**REDACTED**'
-[INFO] 20250922T120714 startup export GPG_PASSPHRASE_FILE='/run/secrets/gpg-passphrase'
-[INFO] 20250922T120714 startup export MOKERLINK_HOST='switch'
-[INFO] 20250922T120714 startup export MOKERLINK_PASSWORD='**REDACTED**'
-[INFO] 20250922T120714 startup export MOKERLINK_PASSWORD_FILE='/run/secrets/mokerlink-password'
-[INFO] 20250922T120714 startup export MOKERLINK_USER='remote-backup'
-[INFO] 20250922T120714 startup export TAILSCALE_HOST=''
-[INFO] 20250922T120714 startup export TZ='UTC'
-[INFO] 20250922T120714 startup installing cron.d entry: /usr/local/bin/backup
-[INFO] 20250922T120714 startup mkdir: created directory '/var/spool/cron'
-[INFO] 20250922T120714 startup mkdir: created directory '/var/spool/cron/crontabs'
-[INFO] 20250922T120714 startup mode of '/var/spool/cron/crontabs' changed from 0700 to 0755
-[INFO] 20250922T120714 startup mode of '/var/spool/cron/crontabs/root' changed from 0644 to 0600
-[INFO] 20250922T120714 startup crontab: */15 * * * * /usr/local/bin/backup 2>&1
-[INFO] 20250922T120714 startup handing the reins over to cron daemon
-   .
-   .
-   .
-[INFO] 20250922T161500 backup begin backup
-[INFO] 20250922T161500 backup download 'running' configuration from 'switch'
-[INFO] 20250922T161511 backup completed download of 'running' configuration from 'switch'
-[INFO] 20250922T161511 backup download 'startup' configuration from 'switch'
-[INFO] 20250922T161516 backup completed download of 'startup' configuration from 'switch'
-[INFO] 20250922T161516 backup download 'backup' configuration from 'switch'
-[INFO] 20250922T161523 backup completed download of 'backup' configuration from 'switch'
-[INFO] 20250922T161523 backup compressing backup with bzip2: 20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2
-[INFO] 20250922T161523 backup encrypting backup with 'gpg' (GnuPG)
-[INFO] 20250922T161523 backup downloaded '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar' to '20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg'
-[INFO] 20250922T161524 backup finish backup
+$ mokerlink-backup --host switch-1 --user backup-user --running --format raw
+SYSTEM CONFIG FILE ::= BEGIN
+! System Description: KT-NOS POE-G244GSM Switch
+! System Version: v1.0.0.27
+! System Name: switch-1
+    .
+    .
+    .
 ```
 
-### Run a one-off backup to S3
+Include only running and startup configurations (exclude backup):
 
 ```console
-$ docker run -i --rm \
-      -e AWS_S3_BUCKET_NAME=backups-bucket \
-      -e COMPRESSION=gzip \
-      -e MOKERLINK_HOST=switch \
-      -e MOKERLINK_USER=remote-backup \
-      -v ./secrets/aws-config:/run/secrets/aws-config:ro \
-      -v ./secrets/mokerlink-password:/run/secrets/mokerlink-password:ro \
-      -v ./secrets/gpg-passphrase:/run/secrets/gpg-passphrase:ro \
-      -v /etc/localtime:/etc/localtime:ro \
-      1121citrus/mokerlink-backup backup
+$ mokerlink-backup --host switch-1 -u backup-user --running --startup > partial.tar
 ```
 
-### Docker Compose example
+Exclude the startup configuration:
+
+```console
+$ mokerlink-backup --host switch-1 -u backup-user --no-startup > partial.tar
+```
+
+Connection parameters can be supplied via environment variables instead of
+flags — see [mokerlink-backup CLI](#mokerlink-backup-cli).
+
+### Scheduled backup (cron service)
+
+The image can run as a long-lived Docker Compose service that performs
+backups on a cron schedule and uploads them to S3.
+
+#### Docker Compose
 
 ```yml
 services:
@@ -221,7 +175,7 @@ services:
       - AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME:-backup-bucket}
       - COMPRESSION=xz
       - CRON_EXPRESSION=${CRON_EXPRESSION:-15 3 * * *}
-      - MOKERLINK_HOST=switch
+      - MOKERLINK_HOST=switch-1
       - MOKERLINK_USER=remote-backup
       - TZ=${TZ:-US/Eastern}
     volumes:
@@ -240,53 +194,926 @@ secrets:
     file: ./secrets/mokerlink-password
 ```
 
+#### One-off scheduled backup to S3
+
+```console
+$ docker run -i --rm \
+      -e AWS_S3_BUCKET_NAME=backups-bucket \
+      -e COMPRESSION=gzip \
+      -e MOKERLINK_HOST=switch-1 \
+      -e MOKERLINK_USER=remote-backup \
+      -v ./secrets/aws-config:/run/secrets/aws-config:ro \
+      -v ./secrets/mokerlink-password:/run/secrets/mokerlink-password:ro \
+      -v ./secrets/gpg-passphrase:/run/secrets/gpg-passphrase:ro \
+      -v /etc/localtime:/etc/localtime:ro \
+      1121citrus/mokerlink-backup backup
+```
+
+#### Run as a periodic cron job
+
+```console
+$ docker run -i --rm \
+      -e AWS_S3_BUCKET_NAME=backups-bucket \
+      -e COMPRESSION=bzip2 \
+      -e CRON_EXPRESSION='*/15 * * * *' \
+      -e MOKERLINK_HOST=switch-1 \
+      -e MOKERLINK_USER=remote-backup \
+      -v ./secrets/aws-config:/run/secrets/aws-config:ro \
+      -v ./secrets/mokerlink-password:/run/secrets/mokerlink-password:ro \
+      -v ./secrets/gpg-passphrase:/run/secrets/gpg-passphrase:ro \
+      -v /etc/localtime:/etc/localtime:ro \
+      1121citrus/mokerlink-backup:latest
+```
+
+Example log output:
+
+```console
+[INFO] 20250922T120714 startup create env file /root/.env
+[INFO] 20250922T120714 startup export AWS_S3_BUCKET_NAME='backups-bucket'
+[INFO] 20250922T120714 startup export COMPRESSION='bzip2'
+[INFO] 20250922T120714 startup export CRON_EXPRESSION='*/15 * * * *'
+[INFO] 20250922T120714 startup export MOKERLINK_HOST='switch-1'
+[INFO] 20250922T120714 startup export MOKERLINK_USER='remote-backup'
+[INFO] 20250922T120714 startup installing cron.d entry: /usr/local/bin/backup
+[INFO] 20250922T120714 startup crontab: */15 * * * * /usr/local/bin/backup 2>&1
+[INFO] 20250922T120714 startup handing the reins over to cron daemon
+   .
+   .
+   .
+[INFO] 20250922T161500 backup begin backup
+[INFO] 20250922T161500 backup download 'running' configuration from 'switch-1'
+[INFO] 20250922T161511 backup completed download of 'running' configuration
+[INFO] 20250922T161511 backup download 'startup' configuration from 'switch-1'
+[INFO] 20250922T161516 backup completed download of 'startup' configuration
+[INFO] 20250922T161516 backup download 'backup' configuration from 'switch-1'
+[INFO] 20250922T161523 backup completed download of 'backup' configuration
+[INFO] 20250922T161523 backup compressing backup with bzip2
+[INFO] 20250922T161523 backup encrypting backup with 'gpg' (GnuPG)
+[INFO] 20250922T161524 backup finish backup
+```
+
 ### Verify a backup
 
 ```console
-$ aws s3 cp s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.sha256 -
-3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4  20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar
-$ aws s3 cp --quiet s3://backups-bucket/20250922T161500-switch-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - \
+$ aws s3 cp s3://backups-bucket/20250922T161500-switch-1-mokerlink-1.0.0.27-config-backup.tar.sha256 -
+3b4c5d6e...  20250922T161500-switch-1-mokerlink-1.0.0.27-config-backup.tar
+$ aws s3 cp --quiet \
+    s3://backups-bucket/20250922T161500-switch-1-mokerlink-1.0.0.27-config-backup.tar.bz2.gpg - \
     | gpg --passphrase-file ./secrets/gpg-passphrase --decrypt --batch --quiet \
     | bunzip2 | sha256sum
-3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4  -
+3b4c5d6e...  -
 ```
 
 ---
 
-## Configuration
+### Serial backup
 
-### CLI parameters
+The serial transport issues `show` commands over the console cable and captures
+the output directly — no TFTP server and no `sudo` required.  Use it when the
+switch is unreachable over SSH (factory-reset state, locked-out credentials,
+network misconfiguration).
 
-Parameter | Option | Environment variable | Default | Notes
---- | --- | --- | --- | ---
-Host | `-H`,`--host` | `MOKERLINK_HOST` | `${TAILSCALE_HOST}` | Hostname or IP of the switch. `MOKERLINK_HOST` overrides `TAILSCALE_HOST`.
-User | `-u`,`--user` | `MOKERLINK_USER` | `remote-backup` | SSH username.
-Password | `-p`,`--password` | `MOKERLINK_PASSWORD` | _none_ | Switch login password. Prefer `--password-file`.
-Password file | `-P`,`--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` | File containing the password. Intended as a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/).
-Format | `-f`,`--format` | `MOKERLINK_FORMAT` | `tar` | Output format: `raw` or `tar`.
-Tailscale host | — | `TAILSCALE_HOST` | _none_ | Fallback hostname when `MOKERLINK_HOST` is unset.
-Debug | — | `DEBUG` | `false` | Set to `true` to enable `xtrace`/`verbose`. **WARNING:** exposes passwords in logs.
+> **macOS vs Linux:** Docker Desktop on macOS cannot access USB serial devices
+> (`/dev/cu.usbserial-*`).  Run natively from the repository checkout on macOS.
+> On Linux, Docker with `--device` works.
 
-### Legacy service parameters
+#### macOS — native (no Docker)
 
-These environment variables are used by the `startup` and `backup` scripts
-when the image runs as a Docker Compose service.
+**Hardware setup:** Connect the USB-to-serial adapter to the console port.
+The switch does not need to be on any particular network — serial is a direct
+connection.
 
-Variable | Default | Notes
---- | --- | ---
-`AWS_CONFIG_FILE` | `/run/secrets/aws-config` | AWS credentials file. Intended as a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/).
-`AWS_DRYRUN` | `false` | Set to `true` to pass `--dryrun` to AWS CLI commands.
-`AWS_S3_BUCKET_NAME` | _required_ | S3 bucket for uploads. May include a path prefix, e.g. `your-bucket/backups/daily` (no trailing `/`).
-`COMPRESSION` | `none` | Compression algorithm: `bzip`, `bzip2`, `bzip3`, `gz`, `gzip`, `lzma`, `lzo`, `lzop`, `none`, `pigz`, `pixz`, `xz`, `zip`.
-`CRON_EXPRESSION` | `@daily` | Standard cron expression. See [crontab.guru](https://crontab.guru/).
-`GPG_CIPHER_ALGO` | `aes256` | GnuPG symmetric encryption cipher.
-`GPG_PASSPHRASE` | _none_ | GnuPG passphrase. Prefer `GPG_PASSPHRASE_FILE`.
-`GPG_PASSPHRASE_FILE` | `/run/secrets/gpg-passphrase` | File containing the GnuPG passphrase. Intended as a Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/).
-`TZ` | `UTC` | Timezone for cron scheduling, e.g. `America/New_York`.
+```console
+$ bash "$(pwd)/src/bin/mokerlink-backup" \
+      --transport serial \
+      --running \
+      --format raw
+```
+
+- The serial port is auto-detected (`/dev/cu.usbserial-*`).
+  Use `--port /dev/cu.usbserial-XXXX` to override.
+- The factory-default password (`admin`) is used automatically.
+  Set `MOKERLINK_PASSWORD` or use `--password` if the switch has a custom
+  password.
+- Omit `--running --format raw` to get all three configs as a tar archive.
+
+#### Linux — Docker
+
+```console
+$ docker run --rm \
+      --device /dev/ttyUSB0 \
+      --volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro" \
+      1121citrus/mokerlink-backup:latest \
+      mokerlink-backup --transport serial --port /dev/ttyUSB0 --running --format raw
+```
+
+Replace `/dev/ttyUSB0` with the actual serial device (`ls /dev/ttyUSB* /dev/ttyACM*`).
 
 ---
 
-## Building
+## Restore
+
+### Transports
+
+`mokerlink-restore` supports four transport mechanisms.  Choose based on
+the state of the switch and the hardware available.
+
+| Transport | Switch state | Cable required | TFTP server | `sudo` |
+|---|---|---|---|---|
+| `serial-cmd` | Any, including factory reset | USB-to-serial + console cable | No | No |
+| `ssh-cmd` | Running (SSH enabled) | Ethernet only | No | No |
+| `serial` | Any, including factory reset | USB-to-serial + console cable | Yes (auto-started) | Yes (port 69) |
+| `ssh` | Running (SSH enabled) | Ethernet only | Yes (auto-started) | Yes (port 69) |
+
+> **`serial-cmd` transport (recommended for bootstrap):** Replays the
+> config as interactive CLI commands over the serial console.  No TFTP
+> server or elevated privileges required.  Works on factory-reset switches
+> where SSH is disabled and the firmware's `copy tftp://...` command
+> rejects text-format config files.
+
+Both SSH transports use legacy RSA key exchange flags (`+ssh-rsa`) because
+the Mokerlink firmware does not support modern key exchange algorithms.  The
+switch host key is accepted unconditionally because the firmware regenerates
+it on every factory reset.
+
+#### How command-replay transports work (`serial-cmd` and `ssh-cmd`)
+
+These transports cannot send the `.cfg` file to the switch directly because
+the CLI does not accept the file format produced by `show startup-config`.
+The `cfg-to-commands` helper translates the file into the interactive CLI
+command sequence that a human would type, then the transport issues those
+commands one at a time, waiting for a switch prompt after each.
+
+The `.cfg` file uses an indented block structure:
+
+```text
+SYSTEM CONFIG FILE ::= BEGIN
+! System Version: v1.0.0.27
+vlan 10
+ name "management"
+!
+interface gi1
+ switchport mode access
+ switchport access vlan 10
+!
+```
+
+`cfg-to-commands` converts this to the interactive sequence:
+
+```text
+configure
+vlan 10
+name "management"
+exit
+interface gi1
+switchport mode access
+switchport access vlan 10
+exit
+end
+save
+```
+
+Specific transformations applied:
+
+| Input | Output | Reason |
+|---|---|---|
+| `SYSTEM CONFIG FILE ::= BEGIN` header | stripped | CLI rejects file headers |
+| `!` alone (block terminator) | `exit` | leaves the current config sub-mode |
+| `! comment text` | stripped | CLI does not accept inline comments |
+| blank or whitespace-only lines | stripped | CLI does not accept empty input in config mode |
+| `username …` lines | stripped | stored password hashes cannot be replayed; the CLI prompts interactively for the old password |
+| `interface GEn` | `interface gin` | `show` output uses the `GE` prefix; the `interface` command requires `gi` |
+| indented line (one leading space) | dedented, sent as-is | sub-mode commands are already in scope after the block-opening keyword |
+| implicit start | `configure` prepended | enters global configuration mode |
+| implicit end | `end` then `save` appended | exits config mode and writes startup-config |
+
+#### How TFTP transports work (`serial` and `ssh`)
+
+These transports use the switch CLI's built-in `copy tftp://…` command to
+load the file.  The firmware parses the `.cfg` format natively — no
+translation is required.
+
+The one preparation step applied before serving the file is CRLF
+normalisation: the script converts LF-only line endings (produced by `show`
+output and serial captures) to CRLF (`\r\n`).  The firmware's `copy
+tftp://…` parser requires CRLF; without this step the firmware accepts the
+transfer but silently ignores the contents.
+
+### Restore a running switch (SSH)
+
+Use `ssh-cmd` or `ssh` when the switch is running and SSH is enabled.
+SSH is **not** enabled on factory-reset units; use `serial` for first boot.
+
+#### ssh-cmd (recommended)
+
+Parses the config file and replays commands interactively over SSH.  No
+TFTP server required; no `sudo` needed.  Uses the `mokerlink-restore`
+function defined in [Shell functions](#shell-functions).
+
+```console
+$ mokerlink-restore \
+    --transport ssh-cmd \
+    --config start-config.cfg \
+    --host switch-1
+```
+
+#### ssh (TFTP)
+
+Transfers the config file over TFTP then applies it via SSH.  Requires
+`sudo` for the TFTP server on port 69/UDP.
+
+```console
+$ sudo docker run --rm \
+      --network host --privileged \
+      --volume "$(pwd):/work" --workdir /work \
+      --volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro" \
+      1121citrus/mokerlink-backup:latest \
+      mokerlink-restore \
+          --transport ssh \
+          --config start-config.cfg \
+          --host switch-1
+```
+
+### Restore a factory-reset switch
+
+The `serial-cmd` and `serial` transports both work on any switch regardless
+of whether SSH or the web UI is reachable.  Both require a USB-to-serial
+adapter and the RJ45 console cable shipped with the switch.  Choose based
+on what hardware and privileges are available:
+
+- **`serial-cmd` (recommended)** — replays the config as interactive CLI
+  commands.  No TFTP server or `sudo` required.  Serial cable only.
+- **`serial`** — transfers the config via TFTP.  Requires `sudo` (TFTP
+  port 69) and a direct Ethernet connection in the `192.168.2.0/24` range.
+
+> **macOS vs Linux:** Docker Desktop on macOS runs inside a Linux VM.
+> USB serial devices (`/dev/cu.usbserial-*`) are not available inside the
+> VM.  Both serial transports must run natively from the repository
+> checkout on macOS.  On Linux, Docker with `--device` works for both.
+
+---
+
+#### serial-cmd — macOS (native, no Docker)
+
+**Hardware:** Connect the USB-to-serial adapter to the switch's RJ45 console
+port.  No Ethernet connection is required for the restore itself.
+
+> **Note — Ethernet cable during bootstrap:** If you have an Ethernet cable
+> plugged from your laptop into one of the switch ports while the config is
+> being applied, make sure that port stays in VLAN 1 (the default) after the
+> restore.  Once the restored config assigns the port to a different VLAN,
+> `http://192.168.2.1` will stop responding from that cable.  Either use a
+> port whose config entry leaves it in VLAN 1, or have the router ready so
+> the switch can come up fully without any further manual steps on port 80.
+
+**Restore command** — run from the repository root:
+
+```console
+$ bash "$(pwd)/src/bin/mokerlink-restore" \
+      --transport serial-cmd \
+      --config start-config.cfg
+```
+
+- The serial port is auto-detected (`/dev/cu.usbserial-*`).
+  Use `--port /dev/cu.usbserial-XXXX` to override.
+- The factory-default password (`admin`) is used automatically.
+  Add `--password YOUR_PASS` if the switch already has a custom password.
+- After pushing the config, the script reboots the switch and waits for
+  it to respond on port 80 (default).  Pass `--no-wait` to return
+  immediately without waiting.
+
+---
+
+#### serial-cmd — Linux (Docker)
+
+```console
+$ docker run --rm \
+      --device /dev/ttyUSB0 \
+      --volume "$(pwd):/work" --workdir /work \
+      1121citrus/mokerlink-backup:latest \
+      mokerlink-restore \
+          --transport serial-cmd \
+          --config start-config.cfg \
+          --port /dev/ttyUSB0
+```
+
+- Replace `/dev/ttyUSB0` with the actual serial device
+  (`ls /dev/ttyUSB* /dev/ttyACM*`).
+- To supply a custom password, add:
+  `--volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro"`
+
+---
+
+#### serial — macOS (native, no Docker)
+
+Use `serial` when `serial-cmd` is unavailable or a TFTP-based transfer
+is preferred.  Requires `sudo` and a direct Ethernet connection to the
+switch.
+
+**Hardware setup:**
+
+1. Connect the USB-to-serial adapter to the switch's RJ45 console port.
+2. Connect an Ethernet cable from the laptop to any switch port.
+3. Set the Ethernet interface to a static address in `192.168.2.0/24` —
+   for example, `192.168.2.10` (any address other than `192.168.2.1`).
+4. Confirm the switch is reachable:
+
+   ```console
+   $ ping -c 3 192.168.2.1
+   ```
+
+**Restore command** — run from the repository root:
+
+```console
+$ sudo bash "$(pwd)/src/bin/mokerlink-restore" \
+      --transport serial \
+      --config start-config.cfg \
+      --tftp-host 192.168.2.10
+```
+
+- Replace `192.168.2.10` with the IP configured in step 3.
+- Replace `start-config.cfg` with the configuration file to restore.
+- The serial port is auto-detected (`/dev/cu.usbserial-*`).
+  Use `--port /dev/cu.usbserial-XXXX` to override.
+- The factory-default password (`admin`) is used automatically.
+  Add `--password YOUR_PASS` if the switch already has a custom password.
+
+The script starts the macOS built-in TFTP daemon, opens the serial console,
+pushes the config, and reboots the switch.  Total time: about two minutes.
+
+---
+
+#### serial — Linux (Docker)
+
+**Hardware setup:** same steps 1–4 as macOS above.
+
+**Restore command:**
+
+```console
+$ sudo docker run --rm \
+      --network host --privileged \
+      --volume "$(pwd):/work" --workdir /work \
+      --device /dev/ttyUSB0 \
+      1121citrus/mokerlink-backup:latest \
+      mokerlink-restore --transport serial --config start-config.cfg
+```
+
+- Replace `/dev/ttyUSB0` with the actual serial device.
+  Check with `ls /dev/ttyUSB* /dev/ttyACM*`.
+- The factory-default password (`admin`) is used automatically.
+  To supply a custom password, add:
+  `--volume "$(pwd)/secrets/mokerlink-password:/run/secrets/mokerlink-password:ro"`
+
+---
+
+## Hardware swap — restore from factory reset
+
+Use this procedure when replacing a failed or damaged switch with a new unit
+of the same model.  The goal is to make the replacement switch electrically
+transparent to the rest of the network — same configuration, same port
+assignments, minimal disruption.
+
+> **Estimated disruption:** 5–10 minutes from cable transfer to full network
+> recovery, assuming all preparation steps are done in advance.
+>
+> **Rollback at any point:** transfer all cables back to the original switch.
+> The network heals within seconds.  Keep the original switch powered and
+> uncabled until Phase 5 verification passes — it is your safety net.
+
+---
+
+### Prerequisites
+
+Before starting, confirm you have:
+
+- [ ] A verified backup configuration file (`start-config.cfg`) from the
+      switch being replaced
+- [ ] The USB-to-serial adapter and the RJ45 console cable shipped with
+      the switch
+- [ ] Admin access to the firewall web UI or SSH console
+- [ ] The replacement switch (factory reset, still in bootstrap state)
+- [ ] The laptop with this repository checked out and `sudo` access
+
+---
+
+### Phase 1 — Prepare before touching any cables
+
+Complete these steps while the original switch is still running and the
+network is healthy.
+
+#### 1.1 — Find the replacement switch's MAC address
+
+The base MAC address is printed on the label on the bottom of the unit.
+Write it down — you need it in the next step.
+
+The switch uses a block of MAC addresses for its ports, all derived from
+the base MAC.  The management interface uses the base MAC directly.
+
+#### 1.2 — Update the DHCP reservation on the firewall
+
+The firewall assigns the switch its fixed management IP via a DHCP
+reservation keyed to the switch's MAC address.[^dhcp-mac]  The replacement
+unit has a different MAC and will not receive the reserved IP unless the
+reservation is updated first.
+
+On **pfSense / OPNsense**:
+
+- Navigate to **Services → DHCP Server → [management VLAN interface]**
+- Scroll to **DHCP Static Mappings**
+- Find the entry for the switch and replace the MAC address with the
+  replacement unit's base MAC
+- Save — no service restart required
+
+> **Why before Phase 3?** If skipped, the replacement switch gets a
+> random DHCP address.  Locating it later requires serial console access.
+
+#### 1.3 — Check the spanning-tree MST region name in the config file
+
+Open `start-config.cfg` and find this block:
+
+```text
+spanning-tree mst configuration
+ name "..."
+```
+
+If the `name` field contains a MAC address (hex octets separated by
+colons, e.g. `"1C:2A:A3:1D:0F:99"`), it is set to the **old switch's
+hardware MAC**.[^mst]  Change it to a stable, hardware-independent
+identifier — the switch hostname works well:
+
+```text
+spanning-tree mst configuration
+ name "switch-1"
+```
+
+Save the updated config file before proceeding.
+
+---
+
+### Phase 2 — Bootstrap the replacement switch
+
+Follow the [serial-cmd procedure](#serial-cmd--macos-native-no-docker)
+using the replacement switch and the config file updated in Phase 1.
+
+Summary of what that procedure does:
+
+1. Connect the USB-to-serial adapter to the replacement switch's console port.
+2. Run `bash "$(pwd)/src/bin/mokerlink-restore" --transport serial-cmd
+   --config start-config.cfg --no-wait` to push the config and reboot
+   the switch.
+3. Remove the serial adapter.
+
+At the end of Phase 2, the replacement switch holds the production
+configuration.  The original switch is still running with all production
+cables attached.
+
+---
+
+### Phase 3 — Transfer cables
+
+1. **Photograph the current cable layout** before touching anything.
+   A photo is faster and more reliable than re-reading port labels when
+   re-cabling under pressure.
+
+2. Transfer every cable from the original switch to the replacement switch,
+   **matching port numbers exactly**: port 1 → port 1, port 2 → port 2,
+   and so on.
+
+3. Leave the original switch powered but uncabled — it is the rollback
+   target if anything goes wrong.
+
+---
+
+### Phase 4 — Cutover
+
+> **Order matters.** The ARP flush (step 4.2) must happen before the
+> router reboot (step 4.4) so that the router re-learns MAC addresses
+> from a clean state rather than re-populating its cache from stale data.
+
+#### 4.1 — Wait for the replacement switch to finish booting
+
+After the last cable is seated, wait for the port LEDs to stabilize
+(approximately 60 seconds).  The switch is running the production config
+at this point but the rest of the network still has stale Layer-2
+information.
+
+#### 4.2 — Flush the ARP table on the firewall  ⚠ critical step
+
+**This is the most important and most easily missed step.**
+
+When the replacement switch comes up, every IP address in the network is
+unchanged but every MAC address has changed.  The firewall's ARP cache
+still maps those IPs to the old switch's physical addresses.[^arp]
+Until the cache is flushed, packets for the switch management IP and for
+any device that did not reboot will be silently dropped.
+
+**pfSense / OPNsense — web UI:**
+Diagnostics → ARP Table → **Clear ARP Table**
+
+**pfSense / OPNsense — SSH or console shell:**
+
+```console
+# arp -d -a
+```
+
+**Generic Linux firewall / router:**
+
+```console
+# ip neigh flush all
+```
+
+#### 4.3 — Flush the ARP table on any other Layer-3 device
+
+If there is a separate upstream router between the firewall and the ISP,
+reboot it or flush its ARP table via its management interface.  The same
+stale-cache problem applies to any device that has a MAC-to-IP mapping
+for addresses in your network.
+
+#### 4.4 — Reboot the router
+
+A full reboot clears any remaining Layer-2 forwarding tables and ARP
+state that a manual flush might not reach.  For most home routers,
+power-cycling is the safest approach.  Wait for the router to finish
+booting (~90 seconds) before running verification.
+
+---
+
+### Phase 5 — Verify
+
+Allow two minutes for all devices to re-register after the router
+comes back up, then confirm:
+
+| Check | Command / location | Expected result |
+|---|---|---|
+| Switch responds to ping | `ping -c 3 <SWITCH-IP>` | Replies, <2 ms |
+| Switch web UI loads | Browser → `http://<SWITCH-IP>` | Login page loads |
+| Firewall ARP table | Diagnostics → ARP Table | Switch entry shows **new** MAC |
+| DHCP lease table | Services → DHCP Leases | Switch shows correct reserved IP |
+| Upstream connectivity | Speed test from a wired client | Completes without failure |
+| All managed VLANs | Ping a device on each VLAN | All reply |
+
+If all checks pass: power off the original switch.
+
+If any check fails: see [Rollback](#rollback) and
+[Troubleshooting the swap](#troubleshooting-the-swap) below.
+
+---
+
+### Rollback
+
+If the network does not recover fully within five minutes of Phase 4:
+
+1. Transfer all cables back to the original switch (Phase 3 in reverse).
+2. The network heals within seconds — the original switch never lost power.
+3. Flush the firewall ARP table again (step 4.2) to clear any state
+   accumulated during the failed cutover.
+
+Investigate the failure before attempting the swap again.
+
+---
+
+### Troubleshooting the swap
+
+#### Switch management IP unreachable
+
+Most common cause: stale ARP entry on the firewall.  Verify:
+
+```console
+# arp -n <SWITCH-IP>
+```
+
+If the output shows the **old** MAC address, the flush in step 4.2 did
+not complete.  Repeat the flush; then ping the switch immediately to
+trigger fresh ARP resolution.
+
+If no entry appears at all, the DHCP reservation (step 1.2) may not have
+been updated.  Connect via serial console to check the management IP the
+switch actually received.
+
+#### Firewall CPU spikes to ~100% every 1–2 minutes
+
+Cause: the firewall has stale ARP entries for multiple IPs simultaneously.
+It is sending ARP probes, receiving no reply, and retrying on a
+~90-second cycle.[^arp-retry]
+
+Fix: repeat step 4.2 (flush all ARP).  If specific devices remain
+unreachable, reboot those devices — when they come back up they send a
+*gratuitous ARP* that immediately updates every neighbour's cache.[^garp]
+
+#### Port LEDs flapping or intermittent connectivity after reboot
+
+Cause: if step 1.3 was skipped and the `spanning-tree mst configuration
+name` still contains the old switch's hardware MAC, spanning tree treats
+the replacement as a different MST region.[^mst]  Every uplink port goes
+through a Listening → Learning → Forwarding convergence cycle
+(~30–50 seconds) rather than transitioning instantly.
+
+Fix: update `start-config.cfg` per step 1.3, re-push via `ssh-cmd`
+transport, and reboot the switch:
+
+```console
+$ mokerlink-restore \
+    --transport ssh-cmd \
+    --config start-config.cfg \
+    --host <SWITCH-IP>
+```
+
+#### ARP flush did not restore connectivity
+
+If the ARP flush in step 4.2 did not restore access to the switch or to
+devices behind it, there are three possible root causes:
+
+1. **The restore (Phase 2) did not take** — the switch rebooted with its
+   factory-default config and is sitting at `192.168.2.1`, not the
+   production management IP.
+2. **The switch has the right IP but the ARP entry on the firewall is
+   static** (not dynamic) — a static entry is not cleared by the
+   bulk flush.
+3. **The switch has the right IP but its VLAN or trunk configuration
+   did not come up correctly** — devices connected through the switch
+   are on a VLAN that is not carrying traffic.
+
+Work through these in order:
+
+##### Step 1 — check what IP the switch actually has (serial console)
+
+Connect the USB-to-serial adapter, open a terminal session, and run:
+
+```text
+show ip interface brief
+```
+
+or, if that returns nothing useful:
+
+```text
+show interface vlan 1
+show running-config
+```
+
+Look for the line that shows the management interface IP address.
+
+- **Shows `192.168.2.1`** — the restore did not take.  The switch came
+  back at factory default.  Proceed to [Re-run Phase 2](#re-run-phase-2).
+- **Shows the production IP** — the restore took.  The problem is
+  between the switch and the firewall.  Proceed to Step 2.
+
+##### Step 2 — direct-connect test
+
+Plug a laptop directly into any access port on the switch (not the
+uplink to the firewall).  Assign the laptop a static IP in the same
+subnet as the switch management IP — for example, if the switch
+management IP is `10.0.0.2`, set the laptop to `10.0.0.50 /
+255.255.255.0`.  Then:
+
+```console
+$ ping 10.0.0.2
+```
+
+- **Ping succeeds** — the switch itself is healthy.  The problem is
+  upstream of the switch (firewall ARP or VLAN trunk).  Proceed to
+  Step 3.
+- **Ping fails** — the switch has the right IP in its config but the
+  management interface is not up.  Run `show interface vlan 1` on the
+  serial console and look for `up/down` — the management VLAN may not
+  have a physical port assigned.  Compare the running config against the
+  backup to identify what is missing.
+
+##### Step 3 — inspect the firewall ARP table for a stale static entry
+
+In the pfSense web UI go to **Diagnostics → ARP Table**.  Find the row
+for the switch management IP.
+
+- **Row shows the old switch's MAC** — the bulk flush did not remove
+  this entry, or the entry was re-learned from stale traffic before the
+  new switch came up.  Delete the row directly from the UI (trash icon),
+  then from the pfSense shell:
+
+  ```console
+  # arp -d <SWITCH-IP>
+  # ping -c 3 <SWITCH-IP>
+  ```
+
+  The `ping` forces the firewall to send a fresh ARP request; the
+  replacement switch replies with its new MAC and the table is rebuilt.
+
+- **Row shows the new switch's MAC** — the firewall can reach the switch
+  at Layer 2.  If `ping` still fails from the firewall, there is a
+  routing or firewall rule issue, not an ARP problem.
+
+- **No row at all** — the firewall cannot see the switch at all.  Check
+  that the firewall's interface for the switch network is up
+  (**Interfaces → [interface name]**) and that the uplink cable between
+  the firewall and the switch is in the correct port on both ends.
+
+##### Step 4 — devices behind the switch still unreachable
+
+If the switch management IP is now reachable but devices on other
+subnets (for example, an application server at `10.10.0.10`) are still
+down, the VLAN trunk between the switch and the firewall is the most
+likely cause.
+
+On the serial console run:
+
+```text
+show interface <uplink-port>
+show vlan
+```
+
+Verify that:
+
+- The uplink port is in trunk mode and is carrying the expected VLANs.
+- Each VLAN that should carry traffic appears in the VLAN table with the
+  correct ports assigned.
+
+If the VLAN config looks correct but traffic still does not flow,
+reboot the switch once with the production config in place.  Some
+firmware versions do not fully apply trunk configuration until after a
+clean reboot from startup-config.
+
+##### Re-run Phase 2
+
+If the switch is at `192.168.2.1` (factory default), re-run the restore
+from the repository root:
+
+```console
+$ bash "$(pwd)/src/bin/mokerlink-restore" \
+      --transport serial-cmd \
+      --config start-config.cfg \
+      --no-wait
+```
+
+No Ethernet connection is required — the command runs entirely over the
+serial console.  Watch the output during the command-replay phase; each
+config command is printed as it is sent.  If the script hangs after a
+particular command, the switch may have rejected that line or entered an
+unexpected prompt.  Press Ctrl+C after the timeout expires (~30 s) and
+check which command was last sent in the output.
+
+---
+
+### Background
+
+[^dhcp-mac]: **DHCP reservations are keyed to MAC address.**  DHCP works
+by assigning IPs to clients identified by their MAC (hardware) address.
+A static mapping or reservation tells the DHCP server "always give this
+MAC this IP."  Because the replacement switch has a different MAC than
+the original, it presents as a completely unknown client.  Depending on
+firewall policy it either receives a dynamic address from the general
+pool, or is denied entirely.
+
+[^mst]: **Spanning Tree MST region name.**  IEEE 802.1s Multiple Spanning
+Tree groups switches into *regions* — switches agree on the same region
+name, revision number, and VLAN-to-instance table before they form a
+region together.  Switches in different regions see each other as a
+single opaque bridge at the boundary and re-run spanning tree across that
+boundary.  If the region name is a hardware MAC address, a replacement
+switch will advertise a different name, causing the uplink to go through
+a full STP convergence cycle (~30–50 s) on every reboot and potentially
+a brief forwarding loop during the transition.  A fixed hostname-based
+name eliminates this entirely.  See
+[IEEE 802.1s](https://www.ieee802.org/1/pages/802.1s.html) for the
+specification.
+
+[^arp]: **ARP caching.**  ARP (Address Resolution Protocol, RFC 826) is
+how Layer-3 devices find the Layer-2 MAC address for a known IP.  The
+result is cached in an *ARP table* — typically for 10–20 minutes on
+Linux/BSD, longer on some commercial devices — to avoid broadcasting an
+ARP request on every packet.  When a switch is replaced, the IPs stay
+the same but the MACs change.  Any device with a stale ARP entry for an
+address on or behind the switch will silently drop packets until the
+entry expires or is manually cleared.
+
+[^arp-retry]: **ARP probe retry cycle.**  When a cached ARP entry is
+about to expire, the host first sends a unicast *probe* to the cached MAC.
+If there is no reply (because the hardware is gone), it falls back to a
+broadcast ARP *request*.  On Linux the default probe interval is ~30 s
+with three retries; on BSD/pfSense it is approximately 90–120 s.  Each
+unresolvable cache entry generates a brief CPU spike on the router or
+firewall, producing the characteristic ~100% spikes at regular intervals
+that indicate multiple stale ARP entries — one spike per entry per probe
+cycle.
+
+[^garp]: **Gratuitous ARP.**  When a device boots or its IP configuration
+changes, it broadcasts an unsolicited ARP reply — a *gratuitous ARP* —
+announcing "I am IP x.x.x.x and my MAC is AA:BB:CC:DD:EE:FF."  Every
+device on the subnet that receives this immediately updates its ARP cache
+for that IP.  This is why rebooting end devices (servers, cameras, etc.)
+after a switch swap clears stale ARP entries faster than waiting for the
+natural cache-expiry cycle.
+
+---
+
+## Reference
+
+### mokerlink-backup CLI
+
+```text
+mokerlink-backup [options]
+
+Download a backup of a Mokerlink managed network switch.
+
+Options:
+  -h,-?,--help           Display this help text
+  -v,--version           Display command version
+  -t,--transport TRANS   Transport: ssh (default) or serial
+  -a,--all               Include all configurations (default)
+  -r,--running           Include running configuration
+     --no-running        Exclude running configuration
+  -s,--startup           Include startup configuration
+     --no-startup        Exclude startup configuration
+  -b,--backup            Include backup configuration
+     --no-backup         Exclude backup configuration
+  -f,--format FMT        Output format: 'raw' or 'tar'
+                         (env: MOKERLINK_FORMAT; default: 'tar')
+  -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST;
+                         ssh transport only)
+     --port PORT         Serial device path (serial transport only;
+                         default: auto-detect)
+  -u,--user USER         SSH username (env: MOKERLINK_USER;
+                         default: remote-backup)
+  -p,--password PW       Password (env: MOKERLINK_PASSWORD)
+  -P,--password-file FILE
+                         Password file (env: MOKERLINK_PASSWORD_FILE;
+                         default: /run/secrets/mokerlink-password)
+```
+
+| Parameter | Option | Environment variable | Default |
+|---|---|---|---|
+| Transport | `-t`, `--transport` | — | `ssh` |
+| Host | `-H`, `--host` | `MOKERLINK_HOST` | `${TAILSCALE_HOST}` |
+| Serial port | `--port` | — | auto-detect |
+| User | `-u`, `--user` | `MOKERLINK_USER` | `remote-backup` |
+| Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | *none* |
+| Password file | `-P`, `--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` |
+| Format | `-f`, `--format` | `MOKERLINK_FORMAT` | `tar` |
+| Tailscale host | — | `TAILSCALE_HOST` | *none* |
+| Debug | — | `DEBUG` | `false` |
+
+`MOKERLINK_HOST` takes precedence over `TAILSCALE_HOST`.  Set `DEBUG=true`
+to enable `xtrace`/`verbose` output — **warning:** this exposes passwords
+in logs.
+
+### mokerlink-restore CLI
+
+```text
+mokerlink-restore --transport TRANSPORT --config FILE [options]
+
+Push a configuration file to a Mokerlink switch and reboot it.
+
+Options:
+  -h,-?,--help           Display this help text
+  -v,--version           Display command version
+  -t,--transport TRANS   Transport: serial-cmd, serial, ssh, ssh-cmd
+                         (required)
+  -c,--config FILE       Configuration file to push (required)
+  -H,--host HOST         Switch IP or hostname (default: 192.168.2.1)
+     --port PORT         Serial device path (serial/serial-cmd transports;
+                         default: auto-detect)
+     --tftp-host IP      Local IP the TFTP server binds to and the switch
+                         pulls from (serial and ssh transports;
+                         env: TFTP_HOST; default: auto-detect)
+  -u,--user USER         Login username (default: admin)
+  -p,--password PW       Password (env: MOKERLINK_PASSWORD)
+  -P,--password-file FILE
+                         Password file (env: MOKERLINK_PASSWORD_FILE;
+                         default: /run/secrets/mokerlink-password)
+     --no-reboot         Push config but do not reboot the switch
+     --wait              Wait for switch to respond after reboot
+     --no-wait           Return immediately after triggering reboot
+```
+
+| Parameter | Option | Environment variable | Default |
+|---|---|---|---|
+| Transport | `-t`, `--transport` | — | *(required)* |
+| Config file | `-c`, `--config` | — | *(required)* |
+| Host | `-H`, `--host` | `MOKERLINK_HOST` | `192.168.2.1` |
+| Serial port | `--port` | — | auto-detect |
+| TFTP host | `--tftp-host` | `TFTP_HOST` | auto-detect |
+| User | `-u`, `--user` | — | `admin` |
+| Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | `admin` (serial only) |
+| Password file | `-P`, `--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` |
+
+`--wait` / `--no-wait` default by transport: `serial-cmd` and `serial`
+default to `--wait`; `ssh` and `ssh-cmd` default to `--no-wait`.
+
+### Scheduled backup parameters
+
+These environment variables control the cron service when the image runs
+as a Docker Compose service.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `AWS_CONFIG_FILE` | `/run/secrets/aws-config` | AWS credentials file (Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/)) |
+| `AWS_DRYRUN` | `false` | Set to `true` to pass `--dryrun` to AWS CLI commands |
+| `AWS_S3_BUCKET_NAME` | *(required)* | S3 bucket for uploads; may include a path prefix, e.g. `your-bucket/backups/daily` |
+| `COMPRESSION` | `none` | Algorithm: `bzip2`, `gz`, `gzip`, `lzma`, `lzo`, `none`, `xz`, `zip`, and others |
+| `CRON_EXPRESSION` | `@daily` | Standard cron expression — see [crontab.guru](https://crontab.guru/) |
+| `GPG_CIPHER_ALGO` | `aes256` | GnuPG symmetric cipher |
+| `GPG_PASSPHRASE` | *none* | GnuPG passphrase; prefer `GPG_PASSPHRASE_FILE` |
+| `GPG_PASSPHRASE_FILE` | `/run/secrets/gpg-passphrase` | File containing the passphrase (Docker [secret](https://docs.docker.com/compose/how-tos/use-secrets/)) |
+| `TZ` | `UTC` | Timezone for cron scheduling, e.g. `America/New_York` |
+
+### Building
 
 Use the `build` script at the project root.  It wraps `docker buildx` and
 handles multi-arch targets, SBOM/provenance attestations, and version tagging.
@@ -312,7 +1139,7 @@ installed for cross-platform builds:
 docker run --rm --privileged tonistiigi/binfmt --install all
 ```
 
-## Security
+### Security
 
 See [SECURITY.md](SECURITY.md) for the full threat model, credential handling
 guidance, SSH host-key verification trade-offs, and S3 hardening recommendations.

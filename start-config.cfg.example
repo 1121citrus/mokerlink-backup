@@ -1,0 +1,49 @@
+SYSTEM CONFIG FILE ::= BEGIN
+! Example bootstrap configuration for a Mokerlink KT-NOS POE-G244GSM switch.
+! Copy this file to start-config.cfg and fill in every <PLACEHOLDER> value
+! before running mokerlink-restore.
+!
+system name "switch"
+system location "<LOCATION>"
+system contact "<admin@your-domain.example>"
+ip address 192.168.2.1 mask 255.255.255.0
+!
+! Generate an encrypted password hash on a running switch:
+!   login, then: username "admin" secret <plaintext-password>
+!   the switch will store it in encrypted form; retrieve with:
+!   show running-config | grep username
+username "admin" secret encrypted <CHANGE-ME>
+!
+! Add additional usernames here, e.g.:
+! username "remote-backup" privilege 15 secret encrypted <CHANGE-ME>
+!
+clock source sntp
+sntp host <NTP-SERVER-IP> port 123
+!
+! Define VLANs here, e.g.:
+! vlan 10
+!  name "USERS"
+! vlan 20
+!  name "MANAGEMENT"
+!
+voice-vlan oui-table 00:E0:BB "3COM"
+voice-vlan oui-table 00:03:6B "Cisco"
+voice-vlan oui-table 00:E0:75 "Veritel"
+voice-vlan oui-table 00:D0:1E "Pingtel"
+voice-vlan oui-table 00:01:E3 "Siemens"
+voice-vlan oui-table 00:60:B9 "NEC/Philips"
+voice-vlan oui-table 00:0F:E2 "H3C"
+voice-vlan oui-table 00:09:6E "Avaya"
+!
+! MST region name must be a stable string — do NOT use the switch hardware
+! MAC address here.  If you use the MAC, replacing the switch hardware will
+! change the name, trigger spanning-tree reconvergence, and cause a brief
+! network outage.  Use a fixed hostname or site label instead.
+spanning-tree mst configuration
+ name "<SWITCH-HOSTNAME>"
+!
+! Add interface configuration here, e.g.:
+! interface GE1
+!  description "uplink"
+!  switchport trunk allowed vlan add 10,20
+!

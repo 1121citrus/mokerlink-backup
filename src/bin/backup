@@ -9,7 +9,7 @@
 #   backup [options]
 #
 # OPTIONS
-#   -?,--help              Display this help text
+#   -h,-?,--help           Display this help text
 #   -v,--version           Display command version
 #   --host HOST            Switch hostname or IP (env: MOKERLINK_HOST)
 #   --user USER            SSH username (env: MOKERLINK_USER;
@@ -91,7 +91,7 @@ _cli_dryrun=
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -\?|--help)
+        -h|-\?|--help)
             show_help
             exit 0
             ;;

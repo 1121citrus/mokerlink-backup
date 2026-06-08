@@ -2,3 +2,8 @@
 .project
 
 *.new
+
+# Switch configuration files may contain credentials — keep out of the repo.
+# Commit only *.cfg.example (generic templates with no real values).
+*.cfg
+!*.cfg.example

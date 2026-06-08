@@ -43,7 +43,7 @@ LABEL org.opencontainers.image.title="mokerlink-backup" \
 # Install required utilities and configure environment.
 # bzip3 and pixz are not available in AL2023; gzip, bzip2, xz, lzop, and pigz
 # cover all common backup compression scenarios.
-# hadolint ignore=DL3041
+# hadolint ignore=DL3013,DL3041
 RUN set -eux; \
     dnf install -y --quiet \
         bzip2 \
@@ -61,9 +61,13 @@ RUN set -eux; \
     && pip3 install --no-cache-dir --upgrade \
         'cryptography>=46.0.5' \
         'jaraco.context>=6.1.0' \
+        'tftpy>=0.8.0' \
         'urllib3>=2.6.3' \
         'wheel>=0.46.2' \
         'zipp>=3.19.1' \
+    && pip3 install --no-cache-dir --upgrade --ignore-installed \
+        'setuptools>=78.1.1' \
+    && dnf upgrade -y --quiet \
     && dnf reinstall -y --quiet python3-urllib3 \
     && useradd \
         --create-home --shell /sbin/nologin \

@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+
+# Start a one-shot TFTP server, serve one named file, then stop.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   tftp-serve --file FILE [--address ADDR] [--timeout SECS]
+#
+# DESCRIPTION
+#   Starts a TFTP server that serves FILE from a temporary root directory,
+#   waits for TIMEOUT seconds, then stops cleanly.  Designed to run in the
+#   background while a switch performs a 'copy tftp://ADDR/BASENAME startup-
+#   config' command.
+#
+#   Backend: pure-Python stdlib TFTP server (RFC 1350); no external
+#   dependencies required.  python3 is available on every supported platform.
+#
+#   TFTP uses port 69 (UDP), which requires root on most systems.  On macOS
+#   run this script with sudo.  On Linux either run with sudo or use a TFTP
+#   server that supports privilege dropping.
+#
+# OPTIONS
+#   --file FILE        File to serve (required); the TFTP client requests
+#                      the basename of this path
+#   --address ADDR     IP address to bind (default: 0.0.0.0)
+#   --timeout SECS     Seconds to keep the server running (default: 120)
+#   -h,--help          Display this help text
+#
+# ENVIRONMENT
+#   DEBUG              Enable debug tracing (default: false)
+
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1090,SC1091
+source "${bindir}/../common-functions" 2>/dev/null \
+    || source /usr/local/include/bash/common-functions
+
+set -o errexit -o errtrace -o nounset -o pipefail
+is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+
+show_help() {
+    cat <<'EOF'
+Usage: tftp-serve --file FILE [--address ADDR] [--timeout SECS]
+
+Start a one-shot TFTP server to serve a single file to a switch.
+
+Options:
+  --file FILE        File to serve via TFTP (required)
+  --address ADDR     Bind address (default: 0.0.0.0)
+  --timeout SECS     Seconds to keep server running (default: 120)
+  -h,--help          Display this help text
+
+The TFTP server listens on port 69 (UDP), which requires root.
+On macOS: run with sudo.
+On Linux: run with sudo or use a root-owned wrapper.
+
+The switch retrieves the file with:
+  copy tftp://THIS_HOST/BASENAME startup-config
+EOF
+}
+
+# ── Defaults ──────────────────────────────────────────────────────────────────
+
+serve_file=
+bind_address="0.0.0.0"
+timeout_secs=120
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --file)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            serve_file="$2"
+            shift
+            ;;
+        --address)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            bind_address="$2"
+            shift
+            ;;
+        --timeout)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            timeout_secs="$2"
+            shift
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -*)
+            error "unknown option: '${1}'"
+            ;;
+        *)
+            error "unexpected argument: '${1}'"
+            ;;
+    esac
+    shift
+done
+
+[[ -n "${serve_file}" ]] || error "--file is required"
+[[ -f "${serve_file}" ]] || error "file not found: '${serve_file}'"
+
+# ── Backend selection ─────────────────────────────────────────────────────────
+
+tftp_pid=
+tmproot=
+
+cleanup() {
+    if [[ -n "${tftp_pid:-}" ]]; then
+        kill "${tftp_pid}" 2>/dev/null || true
+        wait "${tftp_pid}" 2>/dev/null || true
+    fi
+    [[ -n "${tmproot:-}" ]] && rm -rf "${tmproot}"
+}
+trap cleanup EXIT
+
+basename=$(basename "${serve_file}")
+
+# TFTP listens on port 69 (UDP), which is privileged on all platforms.
+# Give an immediate, clear error rather than a confusing permission failure
+# buried in background output.
+if [[ "$(id -u)" -ne 0 ]]; then
+    error "TFTP server requires root (port 69 is privileged); \
+re-run the restore command with sudo"
+fi
+
+# Pure-Python stdlib TFTP server — no external dependencies needed.
+# Implements RFC 1350 read-only (RRQ) for a single file; exits after one
+# successful transfer or after TIMEOUT seconds.  Uses a dedicated transfer
+# socket (random TID) per RFC 1350 section 4.
+tmproot=$(mktemp -d)
+install -m 644 "${serve_file}" "${tmproot}/${basename}"
+python3 - "${tmproot}/${basename}" "${bind_address}" 69 "${timeout_secs}" \
+        <<'__TFTPD__' &
+import signal, socket, struct, sys, time
+
+
+def serve(path, bind_addr, port, timeout_secs):
+    data = open(path, 'rb').read()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((bind_addr, port))
+    sock.settimeout(1.0)
+    deadline = time.monotonic() + timeout_secs
+    while time.monotonic() < deadline:
+        try:
+            pkt, addr = sock.recvfrom(1024)
+        except socket.timeout:
+            continue
+        if len(pkt) < 2 or struct.unpack('!H', pkt[:2])[0] != 1:
+            continue                         # ignore non-RRQ packets
+        xfer = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        xfer.settimeout(5.0)
+        block, ok = 1, True
+        while ok:
+            chunk = data[(block - 1) * 512: block * 512]
+            pkt_out = struct.pack('!HH', 3, block & 0xFFFF) + chunk
+            acked = False
+            for _ in range(3):
+                xfer.sendto(pkt_out, addr)
+                try:
+                    ack, _ = xfer.recvfrom(64)
+                    if (len(ack) >= 4 and
+                            struct.unpack('!HH', ack[:4]) ==
+                            (4, block & 0xFFFF)):
+                        acked = True
+                        break
+                except socket.timeout:
+                    pass
+            if not acked:
+                ok = False                   # client unreachable; switch may retry
+            elif len(chunk) < 512:
+                break                        # final block ACK'd; transfer done
+            else:
+                block += 1
+        xfer.close()
+        if ok:
+            return                           # one transfer complete; exit
+    sock.close()
+
+
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+serve(sys.argv[1], sys.argv[2], int(sys.argv[3]), float(sys.argv[4]))
+__TFTPD__
+tftp_pid=$!
+
+info "TFTP server started (pid ${tftp_pid}); serving ${basename}"
+info "TFTP ready: ${basename} available for ${timeout_secs}s"
+sleep "${timeout_secs}"
+info "TFTP timeout reached; stopping server"

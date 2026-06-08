@@ -31,8 +31,9 @@
 #   the output file appropriately (tar format only).
 #
 # OPTIONS
-#   -?,--help              Display this help text
+#   -h,-?,--help           Display this help text
 #   -v,--version           Display command version
+#   -t,--transport TRANS   Transport: ssh (default) or serial
 #   -a,--all               Include all configurations (default)
 #   -r,--running           Include running configuration
 #      --no-running        Exclude running configuration
@@ -42,7 +43,11 @@
 #      --no-backup         Exclude backup configuration
 #   -f,--format FMT        Output format: 'raw' or 'tar'
 #                          (env: MOKERLINK_FORMAT; default: 'tar')
-#   -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST)
+#   -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST;
+#                          ssh transport only)
+#      --port PORT         Serial device path (serial transport only;
+#                          default: auto-detect /dev/cu.usbserial-* or
+#                          /dev/ttyUSB0)
 #   -u,--user USER         SSH username (env: MOKERLINK_USER;
 #                          default: remote-backup)
 #   -p,--password PW       Password (env: MOKERLINK_PASSWORD)
@@ -61,6 +66,8 @@
 #   TAILSCALE_HOST         Fallback hostname when MOKERLINK_HOST is unset
 #   MOKERLINK_BACKUP_NAME_FILE
 #                          (tar format only) Path to write computed tar filename
+#   LOG_LEVEL              Logging verbosity: trace|debug|info|warn|error
+#                          (default: info)
 #   DEBUG                  Enable debug tracing (default: false)
 #   ENV                    Env-file path (default: ~/.env)
 #
@@ -93,8 +100,11 @@ Usage: mokerlink-backup [options]
 Download a backup of a Mokerlink managed network switch.
 
 Options:
-  -?,--help              Display this help text
+  -h,-?,--help           Display this help text
   -v,--version           Display command version
+  -l,--log-level LEVEL   Log verbosity: trace|debug|info|warn|error
+                         (env: LOG_LEVEL; default: info)
+  -t,--transport TRANS   Transport: ssh (default) or serial
   -a,--all               Include all configurations (default)
   -r,--running           Include running configuration
      --no-running        Exclude running configuration
@@ -104,7 +114,10 @@ Options:
      --no-backup         Exclude backup configuration
   -f,--format FMT        Output format: 'raw' or 'tar'
                          (env: MOKERLINK_FORMAT; default: 'tar')
-  -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST)
+  -H,--host HOST         Switch hostname or IP (env: MOKERLINK_HOST;
+                         ssh transport only)
+     --port PORT         Serial device path (serial transport only;
+                         default: auto-detect)
   -u,--user USER         SSH username (env: MOKERLINK_USER;
                          default: remote-backup)
   -p,--password PW       Password (env: MOKERLINK_PASSWORD)
@@ -116,9 +129,12 @@ Note: The switch is accessed via SSH using legacy algorithms required by the
 Mokerlink firmware. See the README for security considerations.
 
 Examples:
-  # Download all configuration as a tarball:
+  # Download all configuration as a tarball over SSH:
   mokerlink-backup --host switch --user backup-user \
       --password-file secret-pw-file > switch-backup.tar
+
+  # Download the running config over serial console:
+  mokerlink-backup --transport serial --running --format raw
 
   # Print the running switch configuration to stdout:
   mokerlink-backup --host switch --user backup-user \
@@ -131,6 +147,8 @@ show_version() {
 }
 
 # Defaults from environment
+transport="ssh"
+serial_port=
 format="${MOKERLINK_FORMAT:-tar}"
 host="${MOKERLINK_HOST:-${TAILSCALE_HOST:-}}"
 user="${MOKERLINK_USER:-remote-backup}"
@@ -152,13 +170,29 @@ select_backup=
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -\?|--help)
+        -h|-\?|--help)
             show_help
             exit 0
             ;;
         -v|--version)
             show_version
             exit 0
+            ;;
+        -l|--log-level)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            LOG_LEVEL="$2"
+            export LOG_LEVEL
+            shift
+            ;;
+        -t|--transport)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            transport="$2"
+            shift
+            ;;
+        --port)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            serial_port="$2"
+            shift
             ;;
         -a|--all)
             has_positive=true
@@ -226,6 +260,11 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+validate-log-level "${LOG_LEVEL:-info}"
+
+# Compute numeric log level for passing to child Tcl/Expect scripts.
+_log_level_num=$(log-level "${LOG_LEVEL:-info}")
+
 # If no positive selection was made, default to all
 if ! "${has_positive}"; then
     select_running=true
@@ -241,6 +280,12 @@ if "${exclude_running}"; then select_running=false; fi
 if "${exclude_startup}"; then select_startup=false; fi
 if "${exclude_backup}"; then select_backup=false; fi
 
+# Validate transport
+case "${transport}" in
+    ssh|serial) ;;
+    *) error "unknown transport: '${transport}' (expected: ssh or serial)" ;;
+esac
+
 # Validate format
 case "${format}" in
     raw|tar) ;;
@@ -252,12 +297,40 @@ if ! is_true "${select_running}" && ! is_true "${select_startup}" && ! is_true "
     error "no configurations selected (all excluded)"
 fi
 
-# Resolve connection parameters
-[[ -n "${host}" ]] || error 'need MOKERLINK_HOST or TAILSCALE_HOST (or --host / -H)'
-if [[ -z "${password}" ]] && [[ -r "${password_file}" ]]; then
-    password=$(cat "${password_file}")
+# Resolve transport-specific connection parameters.
+if [[ "${transport}" == "ssh" ]]; then
+    [[ -n "${host}" ]] || \
+        error 'need MOKERLINK_HOST or TAILSCALE_HOST (or --host / -H)'
+    if [[ -z "${password}" ]] && [[ -r "${password_file}" ]]; then
+        password=$(cat "${password_file}")
+    fi
+    [[ -n "${password}" ]] || \
+        error 'need MOKERLINK_PASSWORD, --password, or --password-file \
+(default: /run/secrets/mokerlink-password)'
+else
+    # Serial transport: auto-detect port when --port not given.
+    if [[ -z "${serial_port}" ]]; then
+        for _candidate in \
+                /dev/cu.usbserial-* \
+                /dev/ttyUSB0 \
+                /dev/ttyACM0; do
+            if [[ -c "${_candidate}" ]]; then
+                serial_port="${_candidate}"
+                info "auto-detected serial port: ${serial_port}"
+                break
+            fi
+        done
+        [[ -n "${serial_port}" ]] || \
+            error "no serial port found; specify with --port \
+(tried /dev/cu.usbserial-*, /dev/ttyUSB0, /dev/ttyACM0)"
+    fi
+    # Serial backup: use provided password, file, or silently default to
+    # the factory default 'admin'.
+    if [[ -z "${password}" ]] && [[ -r "${password_file}" ]]; then
+        password=$(cat "${password_file}")
+    fi
+    [[ -n "${password}" ]] || password="admin"
 fi
-[[ -n "${password}" ]] || error 'need MOKERLINK_PASSWORD, --password, or --password-file (default: /run/secrets/mokerlink-password)'
 
 info "begin ${command}"
 
@@ -283,24 +356,36 @@ is_true "${select_backup}" && configs+=(backup)
 for config in "${configs[@]}"; do
     info "download '${config}' configuration from '${host}'"
     config_tmp=$(mktemp)
-    # Pass password via env var rather than as a positional arg to avoid
-    # exposing it in the process list (visible to ps(1)).
-    MOKERLINK_PASSWORD="${password}" \
-        bash "${bindir}/get-config" "${config}" "${host}" "${user}" >> "${config_tmp}"
+    if [[ "${transport}" == "serial" ]]; then
+        info "download '${config}' configuration via serial ${serial_port}"
+        # Pass credentials via env vars to avoid process-list exposure.
+        EXPECT_USERNAME="${user}" \
+        EXPECT_PASSWORD="${password}" \
+        EXPECT_LOG_LEVEL_NUM="${_log_level_num}" \
+            bash "${bindir}/get-config-serial" "${serial_port}" "${config}" \
+            >> "${config_tmp}"
+    else
+        info "download '${config}' configuration from '${host}'"
+        # Pass password via env var rather than as a positional arg to avoid
+        # exposing it in the process list (visible to ps(1)).
+        MOKERLINK_PASSWORD="${password}" \
+            bash "${bindir}/get-config" "${config}" "${host}" "${user}" \
+            >> "${config_tmp}"
+    fi
     # Extract version from "! System Version:  v1.0.0.27":
     #   cut -f2 -d:  → "  v1.0.0.27" (field after first colon)
     #   sed 1        → strip leading whitespace
     #   sed 2        → strip trailing whitespace
     #   sed 3        → remove the leading 'v' prefix the firmware adds
     version=$(grep -m1 '^! System Version: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g' | sed 's/^v//g')
-    is_true "${DEBUG}" && debug "version='$version'"
+    log-level-enabled DEBUG && debug "version='$version'"
     [[ -n "${version}" ]] || error 'invalid Mokerlink configuration file - missing version'
     hostname=$(grep -m1 '^! System Name: ' "${config_tmp}" | cut -f2 -d: | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g')
-    is_true "${DEBUG}" && debug "hostname='$hostname'"
+    log-level-enabled DEBUG && debug "hostname='$hostname'"
     [[ -n "${hostname}" ]] || error 'invalid Mokerlink configuration file - missing hostname'
     if [[ "${format}" == "tar" ]]; then
         xml_file="${timestamp}-${hostname}-mokerlink-${version}-${config}-config-backup.xml"
-        is_true "${DEBUG}" && debug "xml_file='$xml_file'"
+        log-level-enabled DEBUG && debug "xml_file='$xml_file'"
         # Add header to pulled config file
         (echo 'SYSTEM CONFIG FILE ::= BEGIN' && \
          echo "! Backup: ${xml_file}" && \
@@ -313,7 +398,7 @@ done
 
 if [[ "${format}" == "tar" ]]; then
     tar_name="${timestamp}-${hostname}-mokerlink-${version}-config-backup.tar"
-    is_true "${DEBUG}" && debug "tar_name='${tar_name}'"
+    log-level-enabled DEBUG && debug "tar_name='${tar_name}'"
     # ':=' assigns empty string when the variable is unset, preventing a
     # nounset error; the block runs only when the caller provided a path.
     if [[ -n "${MOKERLINK_BACKUP_NAME_FILE:=}" ]]; then

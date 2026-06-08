@@ -1,56 +1,296 @@
 #!/usr/bin/env bash
+# shellcheck shell=bash
 
-# Common bash functions.
+# Common bash functions for mokerlink-backup scripts.
+#
+# Adapted from the 1121-citrus.main logging framework.
+#
 # Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-function __log() {
-    local severity=${1:?Need severity}
-    shift
-    echo "[${severity}]" "$(date '+%Y%m%dT%H%M%S')" "$(basename "${0}")" "${@:-}" >/dev/stderr
-}
+# ── Logging level constants ───────────────────────────────────────────────────
+# Numeric thresholds match the 1121-citrus.main logging framework so that
+# log levels are comparable across scripts in the estate.  Guard each
+# constant so the file can be sourced multiple times without errors.
 
-function log() {
-    local severity=${1:?Need severity}
-    shift
-    if [[ -n "${*:-}" ]]; then
-        __log "${severity}" "${@}"
-    else
-        while read -r line; do
-            __log "${severity}" "${line}"
-        done
-    fi
-}
+[[ -z "${LOG_DIAG:+x}"  ]] && readonly LOG_DIAG=0   && export LOG_DIAG
+[[ -z "${LOG_TRACE:+x}" ]] && readonly LOG_TRACE=10  && export LOG_TRACE
+[[ -z "${LOG_DEBUG:+x}" ]] && readonly LOG_DEBUG=20  && export LOG_DEBUG
+[[ -z "${LOG_INFO:+x}"  ]] && readonly LOG_INFO=30   && export LOG_INFO
+[[ -z "${LOG_WARN:+x}"  ]] && readonly LOG_WARN=50   && export LOG_WARN
+[[ -z "${LOG_ERROR:+x}" ]] && readonly LOG_ERROR=60  && export LOG_ERROR
 
-function debug() {
-    log DEBUG "${@:-}"
-}
+[[ -z "${DEFAULT_LOG_LEVEL:-}" ]] && \
+    readonly DEFAULT_LOG_LEVEL='info' && export DEFAULT_LOG_LEVEL
 
+[[ -z "${DEFAULT_LOG_DATE_FORMAT:-}" ]] && \
+    DEFAULT_LOG_DATE_FORMAT="%Y%m%dT%H%M%S" && export DEFAULT_LOG_DATE_FORMAT
+
+# ── debug ─────────────────────────────────────────────────────────────────────
+# Log a debug-level message; suppressed below LOG_LEVEL=debug.
+# Args:
+#   MESSAGE... (optional; reads from stdin if absent)
+# Returns:
+#   0
+function debug() { (set -o noglob; log DEBUG "${@:-}"); }
+
+# ── diag ──────────────────────────────────────────────────────────────────────
+# Log a diagnostic-level message (most verbose developer level).
+# Args:
+#   MESSAGE... (optional; reads from stdin if absent)
+# Returns:
+#   0
+function diag() { (set -o noglob; log DIAG "${@:-}"); }
+
+# ── error ─────────────────────────────────────────────────────────────────────
+# Log an error message to stderr and exit with status 1.
+# Always emitted regardless of LOG_LEVEL.
+# Args:
+#   MESSAGE... — error text
+# Returns:
+#   exits 1
 function error() {
-    log ERROR "${@:-}"
+    local prolog
+    prolog=$(logging-prolog)
+    echo "${prolog}[ERROR] ${*:-}" >/dev/stderr
     exit "${EXIT_CODE:-1}"
 }
 
-function ignore() {
-    log IGNORE "${@:-}"
+# ── ignore ────────────────────────────────────────────────────────────────────
+# Silently discard a message (true no-op — used in place of /dev/null pipes).
+# Args:
+#   MESSAGE... — ignored
+# Returns:
+#   0
+function ignore() { return 0; }
+
+# ── info ──────────────────────────────────────────────────────────────────────
+# Log an info-level message.
+# Args:
+#   MESSAGE... (optional; reads from stdin if absent)
+# Returns:
+#   0
+function info() { (set -o noglob; log INFO "${@:-}"); }
+
+# ── is-true ───────────────────────────────────────────────────────────────────
+# Return 0 if VALUE represents a boolean true, 1 otherwise.
+# Args:
+#   VALUE — one of 1|on|true|t|yes|y (case-insensitive)
+# Returns:
+#   0 if true, 1 otherwise
+function is-true() {
+    local val="${1:-}"
+    [[ "${val,,}" =~ ^(1|on|true|t|yes|y)$ ]]
 }
 
-function info() {
-    log INFO "${@:-}"
+# Backward-compatible underscore alias used by existing scripts.
+function is_true() { is-true "${@}"; }
+
+# ── log ───────────────────────────────────────────────────────────────────────
+# Emit one log line to stderr, level-gated by LOG_LEVEL.
+#
+# Default format: [SEVERITY] MESSAGE
+# Prolog additions are controlled by LOGGING_INCLUDE_* env vars:
+#   LOGGING_INCLUDE_ALL       — enable timestamp, command, and location
+#   LOGGING_INCLUDE_TIMESTAMP — prepend date/time
+#   LOGGING_INCLUDE_COMMAND   — prepend the script name
+#   LOGGING_INCLUDE_LOCATION  — prepend caller function and line number
+#   LOGGING_INCLUDE_LOCATION_FILE — also include the source filename
+#   LOG_DATE_FORMAT           — strftime format string (default %Y%m%dT%H%M%S)
+#
+# Args:
+#   SEVERITY — log level name (optional; defaults to INFO)
+#   MESSAGE... — message text (optional; reads from stdin if absent)
+# Returns:
+#   0
+function log() {
+    local prolog
+    prolog=$(logging-prolog)
+
+    # Extract and validate severity; shift it off so remaining args = message.
+    local severity="INFO"
+    local _tmp=
+    if _tmp=$(logging-severity "${1:-}"); then
+        severity="${_tmp}" && shift
+    fi
+    prolog="${prolog}[${severity}] "
+
+    if log-level-enabled "${severity}"; then
+        if [[ -n "${*:-}" ]]; then
+            echo "${prolog}${*}" >/dev/stderr
+        else
+            while IFS= read -r _line; do
+                echo "${prolog}${_line}" >/dev/stderr
+            done
+        fi
+    fi || :
 }
 
-function is_true() {
-    echo "${1:?Need argument}" | grep -Eiq '^\s*(1|true|t|yes|y)\s*$'
+# ── log-level ─────────────────────────────────────────────────────────────────
+# Convert a log level name to its numeric threshold.
+# Args:
+#   LEVEL — one of diag|trace|debug|info|warn|error (case-insensitive)
+# Returns:
+#   0 and prints the numeric value; 1 if LEVEL is unrecognised
+function log-level() {
+    case "${1,,}" in
+        diag|diagnostic)  echo "${LOG_DIAG}"  ;;
+        trace)            echo "${LOG_TRACE}" ;;
+        debug)            echo "${LOG_DEBUG}" ;;
+        info|information) echo "${LOG_INFO}"  ;;
+        warn|warning)     echo "${LOG_WARN}"  ;;
+        error)            echo "${LOG_ERROR}" ;;
+        *)                return 1 ;;
+    esac
 }
+
+# ── log-level-enabled ─────────────────────────────────────────────────────────
+# Return 0 if SEVERITY is at or above the current LOG_LEVEL threshold.
+# Args:
+#   SEVERITY — log level name
+# Returns:
+#   0 if the level is enabled, 1 otherwise
+function log-level-enabled() {
+    local level="${1:-}"
+    [[ -n "${level}" ]] || return 1
+    local msg_num script_num
+    msg_num=$(log-level "${level}") || return 1
+    script_num=$(log-level "${LOG_LEVEL:-${DEFAULT_LOG_LEVEL:-info}}") \
+        || script_num="${LOG_INFO}"
+    [[ "${msg_num}" -ge "${script_num}" ]]
+}
+
+# ── logging-get-external-caller ───────────────────────────────────────────────
+# Determine the caller (function name and line number) outside this file.
+# Used by logging-prolog when LOGGING_INCLUDE_LOCATION is enabled.
+# Args:
+#   None
+# Returns:
+#   0 and writes "funcname[lineno]" to stdout; 1 on failure
+function logging-get-external-caller() {
+    local this_file="${BASH_SOURCE[0]}"
+    local frame=0
+    while true; do
+        local caller_info=()
+        read -ra caller_info < <(caller "${frame}") || break
+        [[ ${#caller_info[@]} -eq 0 ]] && break
+        local lineno="${caller_info[0]}"
+        local func_name="${caller_info[1]}"
+        local caller_file="${caller_info[2]}"
+        local external_caller="${func_name}[${lineno}]"
+        is-true "${LOGGING_INCLUDE_LOCATION_FILE:-false}" && \
+            external_caller="${external_caller} in $(basename "${caller_file}")"
+        if [[ "${caller_file}" != "${this_file}" ]]; then
+            echo "${external_caller}"
+            return 0
+        fi
+        (( frame++ ))
+    done
+    echo "unknown[0]"
+    return 1
+}
+
+# ── logging-prolog ────────────────────────────────────────────────────────────
+# Build the log line prolog based on LOGGING_INCLUDE_* env vars.
+# By default returns an empty string, producing "[LEVEL] message" format.
+# With LOGGING_INCLUDE_ALL=true: "funcname[lineno]: TIMESTAMP command "
+# Args:
+#   None
+# Returns:
+#   0 and writes the prolog to stdout
+function logging-prolog() {
+    local include_all="${LOGGING_INCLUDE_ALL:-false}"
+    local include_cmd="${LOGGING_INCLUDE_COMMAND:-false}"
+    local include_ts="${LOGGING_INCLUDE_TIMESTAMP:-false}"
+    local include_loc="${LOGGING_INCLUDE_LOCATION:-false}"
+
+    # Command name: included when any of ALL, COMMAND, or LOCATION is set.
+    # LOGGING_COMMAND_OVERRIDE lets callers (e.g. emit-log helper called from
+    # Tcl/Expect) supply the logical script name rather than the helper binary.
+    local cmd=
+    if is-true "${include_all}" || is-true "${include_cmd}" || \
+            is-true "${include_loc}"; then
+        cmd="${LOGGING_COMMAND_OVERRIDE:-$(basename -- "${0}")} "
+    fi
+
+    # Timestamp: included when ALL or TIMESTAMP is set.
+    local date=
+    if is-true "${include_all}" || is-true "${include_ts}"; then
+        local fmt="${LOG_DATE_FORMAT:-${DEFAULT_LOG_DATE_FORMAT:-%Y%m%dT%H%M%S}}"
+        [[ "${fmt}" != +* ]] && fmt="+${fmt}"
+        date="$(date -- "${fmt}") "
+    fi
+
+    # Assemble: location wraps the timestamp+command base as a prefix.
+    local base="${date}${cmd}"
+    if is-true "${include_all}" || is-true "${include_loc}"; then
+        echo "$(logging-get-external-caller): ${base}"
+    else
+        echo "${base}"
+    fi
+}
+
+# ── logging-severity ──────────────────────────────────────────────────────────
+# Validate and normalise a severity string to uppercase.
+# Args:
+#   SEVERITY — candidate severity string
+# Returns:
+#   0 and prints the uppercase severity; 1 if not a recognised level
+function logging-severity() {
+    local severity="${1:-}"
+    log-level "${severity}" >/dev/null && echo "${severity^^}"
+}
+
+# ── trace ─────────────────────────────────────────────────────────────────────
+# Log a trace-level message; suppressed below LOG_LEVEL=trace.
+# Args:
+#   MESSAGE... (optional; reads from stdin if absent)
+# Returns:
+#   0
+function trace() { (set -o noglob; log TRACE "${@:-}"); }
+
+# ── validate-log-level ────────────────────────────────────────────────────────
+# Validate a log level string; exits with an error message if invalid.
+# Args:
+#   LEVEL — log level name to validate
+# Returns:
+#   0 if valid; exits 1 if not
+function validate-log-level() {
+    local level="${1:?Need level}"
+    log-level "${level}" >/dev/null || {
+        # Inline prolog construction so we don't recurse through log().
+        local date=""
+        local cmd=""
+        if is-true "${LOGGING_INCLUDE_ALL:-false}" || \
+                is-true "${LOGGING_INCLUDE_TIMESTAMP:-false}"; then
+            date="$(date '+%Y%m%dT%H%M%S') "
+        fi
+        if is-true "${LOGGING_INCLUDE_ALL:-false}" || \
+                is-true "${LOGGING_INCLUDE_COMMAND:-false}"; then
+            cmd="${LOGGING_COMMAND_OVERRIDE:-$(basename -- "${0}")} "
+        fi
+        echo "${date}${cmd}[ERROR] invalid log level: '${level}'" >/dev/stderr
+        exit 1
+    }
+}
+
+# ── warn ──────────────────────────────────────────────────────────────────────
+# Log a warning-level message.
+# Args:
+#   MESSAGE... (optional; reads from stdin if absent)
+# Returns:
+#   0
+function warn() { (set -o noglob; log WARN "${@:-}"); }

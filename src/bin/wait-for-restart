@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+
+# Poll a TCP port until the switch responds after a reboot.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SYNOPSIS
+#   wait-for-restart --host HOST [--port PORT] [--timeout SECS]
+#                    [--interval SECS]
+#
+# DESCRIPTION
+#   Polls HOST:PORT (default port 80) using bash's /dev/tcp facility until
+#   the connection succeeds or TIMEOUT seconds elapse.  Exits 0 when the
+#   switch responds, 1 on timeout.
+#
+#   Useful after triggering a switch reboot to pause the calling script
+#   until the switch is back up and accepting connections.
+#
+# OPTIONS
+#   --host HOST        Switch hostname or IP (required)
+#   --port PORT        TCP port to poll (default: 80)
+#   --timeout SECS     Total seconds to wait (default: 120)
+#   --interval SECS    Seconds between polls (default: 5)
+#   -h,--help          Display this help text
+#
+# ENVIRONMENT
+#   DEBUG              Enable debug tracing (default: false)
+
+bindir=$(readlink -f "$(dirname "${0}")")
+export PATH=${bindir}:${PATH}
+
+# shellcheck disable=SC1090,SC1091
+source "${bindir}/../common-functions" 2>/dev/null \
+    || source /usr/local/include/bash/common-functions
+
+set -o errexit -o errtrace -o nounset -o pipefail
+is_true "${DEBUG:=false}" && set -o xtrace -o verbose
+
+show_help() {
+    cat <<'EOF'
+Usage: wait-for-restart --host HOST [options]
+
+Poll a TCP port until the switch responds after a reboot.
+
+Options:
+  --host HOST        Switch hostname or IP (required)
+  --port PORT        TCP port to poll (default: 80)
+  --timeout SECS     Total seconds to wait before giving up (default: 120)
+  --interval SECS    Seconds between connection attempts (default: 5)
+  -h,--help          Display this help text
+
+Exits 0 when the switch responds, 1 if it does not respond within timeout.
+EOF
+}
+
+# ── Defaults ──────────────────────────────────────────────────────────────────
+
+wait_host=
+wait_port=80
+wait_timeout=120
+wait_interval=5
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --host)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            wait_host="$2"
+            shift
+            ;;
+        --port)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            wait_port="$2"
+            shift
+            ;;
+        --timeout)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            wait_timeout="$2"
+            shift
+            ;;
+        --interval)
+            [[ $# -ge 2 ]] || error "option '${1}' requires an argument"
+            wait_interval="$2"
+            shift
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -*)
+            error "unknown option: '${1}'"
+            ;;
+        *)
+            error "unexpected argument: '${1}'"
+            ;;
+    esac
+    shift
+done
+
+[[ -n "${wait_host}" ]] || error "--host is required"
+
+# ── Poll loop ─────────────────────────────────────────────────────────────────
+
+info "waiting for ${wait_host}:${wait_port} (timeout ${wait_timeout}s)"
+
+deadline=$(( $(date +%s) + wait_timeout ))
+
+while true; do
+    # bash /dev/tcp is a built-in that opens a TCP connection without
+    # needing netcat or curl; redirect stderr to suppress "connection
+    # refused" noise during the reboot window.
+    if (: > "/dev/tcp/${wait_host}/${wait_port}") 2>/dev/null; then
+        info "${wait_host}:${wait_port} is responding"
+        exit 0
+    fi
+
+    now=$(date +%s)
+    if (( now >= deadline )); then
+        error "timed out after ${wait_timeout}s waiting for \
+${wait_host}:${wait_port}"
+    fi
+
+    remaining=$(( deadline - now ))
+    info "not yet responding; retrying in ${wait_interval}s \
+(${remaining}s remaining)"
+    sleep "${wait_interval}"
+done
