@@ -42,7 +42,7 @@ if (
         --workdir "${PWD}" \
         --entrypoint sh \
         "bats/bats:1.13.0" \
-        -c "apk add --quiet --no-cache docker-cli >/dev/null 2>&1 && bats test"
+        -c "apk add --quiet --no-cache docker-cli python3 >/dev/null 2>&1 && bats test"
 ); then
     finished_at=$(date +%s)
     write_test_summary "passed" 0 "$((finished_at - started_at))"
