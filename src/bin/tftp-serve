@@ -14,9 +14,8 @@
 #   background while a switch performs a 'copy tftp://ADDR/BASENAME startup-
 #   config' command.
 #
-#   Backend selection (first available wins):
-#     1. macOS built-in tftpd via launchctl (requires sudo; uses /private/tftpboot)
-#     2. Python 3 tftpy module (python3 -m tftpy.TftpServer)
+#   Backend: pure-Python stdlib TFTP server (RFC 1350); no external
+#   dependencies required.  python3 is available on every supported platform.
 #
 #   TFTP uses port 69 (UDP), which requires root on most systems.  On macOS
 #   run this script with sudo.  On Linux either run with sudo or use a TFTP
@@ -115,12 +114,6 @@ cleanup() {
         kill "${tftp_pid}" 2>/dev/null || true
         wait "${tftp_pid}" 2>/dev/null || true
     fi
-    # macOS: unload the launchd plist if we loaded it.
-    if [[ "${_backend:-}" == "macos" ]]; then
-        launchctl unload -F \
-            /System/Library/LaunchDaemons/tftp.plist 2>/dev/null || true
-        info "macOS tftpd unloaded"
-    fi
     [[ -n "${tmproot:-}" ]] && rm -rf "${tmproot}"
 }
 trap cleanup EXIT
@@ -135,35 +128,67 @@ if [[ "$(id -u)" -ne 0 ]]; then
 re-run the restore command with sudo"
 fi
 
-# Detect and start the appropriate backend.
-if [[ "$(uname -s)" == "Darwin" ]] && \
-        [[ -f /System/Library/LaunchDaemons/tftp.plist ]]; then
-    # macOS built-in tftpd serves from /private/tftpboot.
-    _backend="macos"
-    tmproot="/private/tftpboot"
-    install -d -m 1777 "${tmproot}"
-    install -m 644 "${serve_file}" "${tmproot}/${basename}"
-    launchctl load -F /System/Library/LaunchDaemons/tftp.plist
-    info "macOS tftpd started; serving ${basename} from ${tmproot}"
-elif python3 -c "import tftpy" 2>/dev/null; then
-    # Python tftpy: run in background via a small inline script.
-    _backend="tftpy"
-    tmproot=$(mktemp -d)
-    install -m 644 "${serve_file}" "${tmproot}/${basename}"
-    python3 - "${tmproot}" "${bind_address}" <<'__TFTPY__' &
-import sys, tftpy, signal
-root, addr = sys.argv[1], sys.argv[2]
-srv = tftpy.TftpServer(root)
-signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-srv.listen(addr, 69)
-__TFTPY__
-    tftp_pid=$!
-    info "tftpy server started (pid ${tftp_pid}); serving ${basename}"
-else
-    error "no TFTP backend available; install python3 tftpy \
-(pip3 install tftpy) or run on macOS where tftpd is built in"
-fi
+# Pure-Python stdlib TFTP server — no external dependencies needed.
+# Implements RFC 1350 read-only (RRQ) for a single file; exits after one
+# successful transfer or after TIMEOUT seconds.  Uses a dedicated transfer
+# socket (random TID) per RFC 1350 section 4.
+tmproot=$(mktemp -d)
+install -m 644 "${serve_file}" "${tmproot}/${basename}"
+python3 - "${tmproot}/${basename}" "${bind_address}" 69 "${timeout_secs}" \
+        <<'__TFTPD__' &
+import signal, socket, struct, sys, time
 
+
+def serve(path, bind_addr, port, timeout_secs):
+    data = open(path, 'rb').read()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((bind_addr, port))
+    sock.settimeout(1.0)
+    deadline = time.monotonic() + timeout_secs
+    while time.monotonic() < deadline:
+        try:
+            pkt, addr = sock.recvfrom(1024)
+        except socket.timeout:
+            continue
+        if len(pkt) < 2 or struct.unpack('!H', pkt[:2])[0] != 1:
+            continue                         # ignore non-RRQ packets
+        xfer = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        xfer.settimeout(5.0)
+        block, ok = 1, True
+        while ok:
+            chunk = data[(block - 1) * 512: block * 512]
+            pkt_out = struct.pack('!HH', 3, block & 0xFFFF) + chunk
+            acked = False
+            for _ in range(3):
+                xfer.sendto(pkt_out, addr)
+                try:
+                    ack, _ = xfer.recvfrom(64)
+                    if (len(ack) >= 4 and
+                            struct.unpack('!HH', ack[:4]) ==
+                            (4, block & 0xFFFF)):
+                        acked = True
+                        break
+                except socket.timeout:
+                    pass
+            if not acked:
+                ok = False                   # client unreachable; switch may retry
+            elif len(chunk) < 512:
+                break                        # final block ACK'd; transfer done
+            else:
+                block += 1
+        xfer.close()
+        if ok:
+            return                           # one transfer complete; exit
+    sock.close()
+
+
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+serve(sys.argv[1], sys.argv[2], int(sys.argv[3]), float(sys.argv[4]))
+__TFTPD__
+tftp_pid=$!
+
+info "TFTP server started (pid ${tftp_pid}); serving ${basename}"
 info "TFTP ready: ${basename} available for ${timeout_secs}s"
 sleep "${timeout_secs}"
 info "TFTP timeout reached; stopping server"

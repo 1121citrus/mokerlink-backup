@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# fix-macos-routing
+
+# Routes WIRED_SUBNET_NET (e.g. 192.168.2.0/24) via the cabled interface;
+# keeps WiFi as default gateway.
+#
+# Designed for macOS where plugging in a cable can cause the system to add an
+# unwanted default route via the wired interface, which breaks connectivity to the switch.
+# Run this with sudo after plugging in the cable to fix the routing.
+#
+# Usage:
+#   sudo fix-routing [options]
+#
+# Configuration:
+#   WIRED_SUBNET_NET: Subnet to route via the wired interface (default: 192.168.2.0)
+#   WIRED_SUBNET_MASK: Subnet mask for the wired subnet (default: 255.255.255.0)
+#
+# Note: the script will attempt to auto-detect the wired and WiFi interfaces, but
+# you can set WIRED_IFACE and WIFI_IFACE environment variables to override if needed. 
+
+# FIXME: add CLI options processing to allow overriding the defaults and auto-detection
+# (e.g. --wired-subnet, --wired-iface, --wifi-iface, --dry-run, etc.)
+
+# FIXME: add more robust error handling and logging, especially for the route commands
+# which may fail if the routes already exist or if permissions are insufficient.
+
+set -euo pipefail
+
+# ─── Configuration ────────────────────────────────────────────────────────────
+WIRED_SUBNET_NET="${WIRED_SUBNET_NET:-192.168.2.0}"
+WIRED_SUBNET_MASK="${WIRED_SUBNET_MASK:-255.255.255.0}"
+# ──────────────────────────────────────────────────────────────────────────────
+
+echo "=== macOS Routing Fix ==="
+echo ""
+
+# ── 1. Auto-detect the wired interface (whichever en* has a 192.168.2.x addr) ─
+WIRED_IFACE=${WIRED_IFACE:-$(ifconfig | awk '
+  /^en[0-9]+:/ { iface = substr($1, 1, length($1)-1) }
+  /inet 192\.168\.2\./  { print iface; exit }
+')}
+
+# ── 2. Auto-detect the WiFi interface by hardware port name ───────────────────
+WIFI_IFACE=${WIFI_IFACE:-$(networksetup -listallhardwareports | awk '
+  /Wi-Fi|AirPort/ { getline; print $2; exit }
+')}
+
+# ── 3. Validate ───────────────────────────────────────────────────────────────
+if [[ -z "$WIRED_IFACE" ]]; then
+  echo "ERROR: No interface found with a 192.168.2.x address."
+  echo "       Is the cable connected and the interface up?"
+  ifconfig | grep -E "^en|inet "
+  exit 1
+fi
+
+if [[ -z "$WIFI_IFACE" ]]; then
+  echo "ERROR: Could not locate the WiFi interface."
+  networksetup -listallhardwareports
+  exit 1
+fi
+
+echo "Wired interface  : $WIRED_IFACE"
+echo "WiFi  interface  : $WIFI_IFACE"
+
+# ── 4. Get the WiFi gateway ───────────────────────────────────────────────────
+WIFI_GW=${WIFI_GW:-$(netstat -rn | awk -v iface="$WIFI_IFACE" '
+  /^default/ && $NF == iface { print $2; exit }
+')}
+
+if [[ -z "$WIFI_GW" ]]; then
+  echo "ERROR: No default route found via WiFi ($WIFI_IFACE)."
+  echo "       Make sure WiFi is connected before running this script."
+  exit 1
+fi
+
+echo "WiFi gateway     : $WIFI_GW"
+echo ""
+
+# ── 5. Remove any default route that was auto-created for the w
+# ── 5. Remove any default route auto-created for the wired interface ──────────
+echo "--- Step 1: Remove unwanted default route via $WIRED_IFACE ---"
+WIRED_DEFAULT_GW=$(netstat -rn | awk -v iface="$WIRED_IFACE" '
+  /^default/ && $NF == iface { print $2; exit }
+')
+
+if [[ -n "$WIRED_DEFAULT_GW" ]]; then
+  echo "  → Found default route via $WIRED_IFACE (gw: $WIRED_DEFAULT_GW) — deleting..."
+  route -n delete default "$WIRED_DEFAULT_GW" \
+    && echo "  ✓ Deleted." \
+    || echo "  ✗ Failed to delete — may already be gone."
+else
+  echo "  ✓ No default route via $WIRED_IFACE found. Nothing to remove."
+fi
+
+echo ""
+
+# ── 6. Remove any stale route for the subnet (avoid 'entry exists' errors) ────
+echo "--- Step 2: Clean up any existing 192.168.2.0 subnet route ---"
+if netstat -rn | awk '{print $1}' | grep -qx "$WIRED_SUBNET_NET"; then
+  echo "  → Existing route for $WIRED_SUBNET_NET found — removing..."
+  route -n delete -net "$WIRED_SUBNET_NET" -netmask "$WIRED_SUBNET_MASK" 2>/dev/null \
+    && echo "  ✓ Removed." \
+    || echo "  ✗ Could not remove (may be a directly-connected route, which is fine)."
+else
+  echo "  ✓ No conflicting subnet route found."
+fi
+
+echo ""
+
+# ── 7. Add explicit subnet route via the wired interface ─────────────────────
+echo "--- Step 3: Add $WIRED_SUBNET_NET/$WIRED_SUBNET_MASK → $WIRED_IFACE ---"
+route -n add -net "$WIRED_SUBNET_NET" -netmask "$WIRED_SUBNET_MASK" -interface "$WIRED_IFACE" \
+  && echo "  ✓ Subnet route added." \
+  || echo "  ✗ Failed to add subnet route (it may already exist as a connected route)."
+
+echo ""
+
+# ── 8. Ensure WiFi is (still) the default gateway ────────────────────────────
+echo "--- Step 4: Confirm WiFi default gateway ---"
+CURRENT_DEFAULT_GW=${CURRENT_DEFAULT_GW:-$(netstat -rn | awk '/^default/ { print $2; exit }')}
+CURRENT_DEFAULT_IF=${CURRENT_DEFAULT_IF:-$(netstat -rn | awk '/^default/ { print $NF; exit }')}
+
+if [[ "$CURRENT_DEFAULT_IF" == "$WIFI_IFACE" ]]; then
+  echo "  ✓ Default route is already correctly set → $CURRENT_DEFAULT_GW via $WIFI_IFACE."
+else
+  echo "  → Default route is via $CURRENT_DEFAULT_IF ($CURRENT_DEFAULT_GW) — correcting..."
+  route -n delete default 2>/dev/null || true
+  route -n add default "$WIFI_GW" \
+    && echo "  ✓ Default route set to $WIFI_GW via $WIFI_IFACE." \
+    || { echo "  ✗ Failed to set default route."; exit 1; }
+fi
+
+echo ""
+
+# ── 9. Final verification ─────────────────────────────────────────────────────
+echo "--- Routing table (relevant entries) ------------------------------------"
+netstat -rn | grep -E "^(default|192\.168\.2)" || true
+echo "-------------------------------------------------------------------------"
+echo ""
+echo "Done."
+echo "  • All traffic       → $WIFI_GW via $WIFI_IFACE (WiFi)"
+echo "  • 192.168.2.0/24   → directly via $WIRED_IFACE (cable)"
+
+# FIXME: Add options to install this as a launchd service that runs automatically when
+# the network configuration changes (e.g. when the cable is plugged in).  This would
+# involve creating a plist file in /Library/LaunchDaemons that watches for changes to
+# the network configuration and runs this script when changes are detected.  The script
+# would need to be modified to run non-interactively and log its output to a file for
+# debugging purposes.
+
+# sudo cp fix-routing /usr/local/sbin/fix-routing
+# sudo chmod 755 /usr/local/sbin/fix-routing
+
+# Save this to /Library/LaunchDaemons/com.local.fix-routing.plist
+
+# <?xml version="1.0" encoding="UTF-8"?>
+# <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+#   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+# <plist version="1.0">
+# <dict>
+#   <key>Label</key>
+#   <string>com.local.fix-routing</string>
+# 
+#   <key>ProgramArguments</key>
+#   <array>
+#     <string>/usr/local/sbin/fix-routing</string>
+#   </array>
+# 
+#   <!-- Re-run whenever the SystemConfiguration network state changes -->
+#   <key>WatchPaths</key>
+#   <array>
+#     <string>/var/run/resolv.conf</string>
+#   </array>
+# 
+#   <key>RunAtLoad</key>
+#   <true/>
+# 
+#   <key>StandardOutPath</key>
+#   <string>/var/log/fix-routing.log</string>
+# 
+#   <key>StandardErrorPath</key>
+#   <string>/var/log/fix-routing.log</string>
+# </dict>
+# </plist>
+# 

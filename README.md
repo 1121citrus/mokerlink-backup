@@ -1015,8 +1015,6 @@ Download a backup of a Mokerlink managed network switch.
 Options:
   -h,-?,--help           Display this help text
   -v,--version           Display command version
-  -l,--log-level LEVEL   Log verbosity: trace|debug|info|warn|error
-                         (env: LOG_LEVEL; default: info)
   -t,--transport TRANS   Transport: ssh (default) or serial
   -a,--all               Include all configurations (default)
   -r,--running           Include running configuration
@@ -1048,7 +1046,6 @@ Options:
 | Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | *none* |
 | Password file | `-P`, `--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` |
 | Format | `-f`, `--format` | `MOKERLINK_FORMAT` | `tar` |
-| Log level | `-l`, `--log-level` | `LOG_LEVEL` | `info` |
 | Tailscale host | — | `TAILSCALE_HOST` | *none* |
 | Debug | — | `DEBUG` | `false` |
 
@@ -1080,26 +1077,9 @@ Options:
   -P,--password-file FILE
                          Password file (env: MOKERLINK_PASSWORD_FILE;
                          default: /run/secrets/mokerlink-password)
-  -l,--log-level LEVEL   Log verbosity: trace|debug|info|warn|error
-                         (env: LOG_LEVEL; default: info)
-     --dry-run           Show what would be done without connecting
      --no-reboot         Push config but do not reboot the switch
      --wait              Wait for switch to respond after reboot
      --no-wait           Return immediately after triggering reboot
-
-Transports:
-  serial-cmd  Serial console (115200/8N1) with per-command config replay.
-              No TFTP server required; no sudo needed.
-              Works on factory-reset switches where SSH is disabled and
-              the firmware rejects TFTP text-format configs.
-              Recommended for bootstrap and restore.
-  serial      Serial console (115200/8N1) + TFTP file transfer.
-              Requires sudo (TFTP port 69).  Use serial-cmd instead if
-              the firmware rejects text-format configs via TFTP.
-  ssh         SSH session + TFTP file transfer.
-              Requires SSH to be enabled (not the factory default).
-  ssh-cmd     SSH session with per-command config replay; no TFTP needed.
-              Requires SSH to be enabled (not the factory default).
 ```
 
 | Parameter | Option | Environment variable | Default |
@@ -1110,10 +1090,8 @@ Transports:
 | Serial port | `--port` | — | auto-detect |
 | TFTP host | `--tftp-host` | `TFTP_HOST` | auto-detect |
 | User | `-u`, `--user` | — | `admin` |
-| Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | `admin` (serial/serial-cmd only) |
+| Password | `-p`, `--password` | `MOKERLINK_PASSWORD` | `admin` (serial only) |
 | Password file | `-P`, `--password-file` | `MOKERLINK_PASSWORD_FILE` | `/run/secrets/mokerlink-password` |
-| Log level | `-l`, `--log-level` | `LOG_LEVEL` | `info` |
-| Dry run | `--dry-run` | — | `false` |
 
 `--wait` / `--no-wait` default by transport: `serial-cmd` and `serial`
 default to `--wait`; `ssh` and `ssh-cmd` default to `--no-wait`.
