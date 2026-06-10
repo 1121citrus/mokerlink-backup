@@ -74,10 +74,8 @@ jobs:
   push:
     needs: [test, scan]
     if: >
-      github.event_name == 'push' && (
-        startsWith(github.ref, 'refs/tags/v') ||
-        github.ref == 'refs/heads/staging'
-      )
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/v')
     uses: 1121citrus/shared-github-workflows/.github/workflows/push.yml@v1
     with:
       image: 1121citrus/mokerlink-backup
