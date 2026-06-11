@@ -173,8 +173,6 @@ BATS_KCOV_TAG=latest
 DIVE_DOCKER_CLIENT_API=1.47
 DIVE_IMAGE=wagoodman/dive
 DIVE_TAG=v0.13.1
-CODE_MAAT_IMAGE=adamtornhill/code-maat
-CODE_MAAT_TAG=latest
 GRYPE_IMAGE=anchore/grype
 GRYPE_TAG=v0.112.0
 HADOLINT_IMAGE=hadolint/hadolint
@@ -182,7 +180,7 @@ HADOLINT_TAG=v2.14.0
 MARKDOWNLINT_IMAGE=ghcr.io/igorshubovych/markdownlint-cli
 MARKDOWNLINT_TAG=v0.48.0
 SCC_IMAGE=ghcr.io/boyter/scc
-SCC_TAG=master
+SCC_TAG=v3.7.0
 SHELLCHECK_IMAGE=koalaman/shellcheck
 SHELLCHECK_TAG=v0.11.0
 TRIVY_IMAGE=aquasec/trivy
@@ -705,7 +703,7 @@ if [[ "${TEST}" == "true" ]]; then
     if [[ -x "${script_dir}/test/run-all" ]]; then
         (cd "${script_dir}" && IMAGE="${full_image}:${VERSION}" TEST_SUMMARY_JSON="${TEST_SUMMARY_JSON}" run ./test/run-all)
     else
-        (cd "${script_dir}" && IMAGE="${full_image}:${VERSION}" run ./test/run-all)
+    (cd "${script_dir}" && IMAGE="${full_image}:${VERSION}" run ./test/run-all)
     fi
     write_build_report
 fi
@@ -943,7 +941,7 @@ if [[ "${ADVISE_METRICS}" == "true" ]]; then
     docker run --rm \
         -v "${script_dir}:/data:ro" \
         "${SCC_IMAGE}:${SCC_TAG}" \
-        --by-file /data >&2 || true
+        scc --by-file /data >&2 || true
 fi
 
 # ---------------------------------------------------------------------------
@@ -979,29 +977,30 @@ if [[ "${ADVISE_SECURITY}" == "true" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Stage 5h: Advise (code-maat — churn / revision analysis)
-# Generates git log and runs code-maat to surface high-churn files.
-# Results printed to stderr.  Never blocks the build.
+# Stage 5h: Advise (churn — git revision frequency)
+# Counts per-file commit frequency from git history.  The 40 most-changed
+# files are printed to stderr as CSV (entity,n-revs).
+# Uses only git and awk — no Docker image required.
+# Never blocks the build.
 # ---------------------------------------------------------------------------
 if [[ "${ADVISE_CHURN}" == "true" ]]; then
     echo "==> Stage 5h: Advise (churn) ${full_image}:${VERSION}" >&2
-    _churn_log=$(mktemp /tmp/churn-log-XXXXXX)
-    # shellcheck disable=SC2064
-    trap "rm -f '${_churn_log}'" EXIT
-    git -C "${script_dir}" log \
-        --all --numstat --date=short \
-        --pretty=format:'--%h--%ad--%s' \
-        > "${_churn_log}" 2>/dev/null || true
-    if [[ -s "${_churn_log}" ]]; then
-        docker run --rm \
-            -v "${_churn_log}:/data/git.log:ro" \
-            "${CODE_MAAT_IMAGE}:${CODE_MAAT_TAG}" \
-            -l /data/git.log -c git2 -a revisions >&2 || true
+    _churn_out=$(
+        git -C "${script_dir}" log \
+            --all --name-only --pretty=format: 2>/dev/null \
+        | grep -v '^[[:space:]]*$' \
+        | sort \
+        | uniq -c \
+        | sort -rn \
+        | awk 'length($0) > 0 { printf "%s,%d\n", $2, $1 }' \
+        | head -40
+    ) || true
+    if [[ -n "${_churn_out}" ]]; then
+        echo "entity,n-revs" >&2
+        printf '%s\n' "${_churn_out}" >&2
     else
-        echo "    Churn analysis skipped: no git log data" >&2
+        echo "    Churn analysis skipped: no git history" >&2
     fi
-    rm -f "${_churn_log}"
-    trap - EXIT
 fi
 
 # ---------------------------------------------------------------------------
