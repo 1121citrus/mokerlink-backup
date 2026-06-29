@@ -111,3 +111,17 @@ Ctrl+O   toggle verbose mode (shows reasoning as grey italic text)
 - **Code First:** Provide code snippets immediately when asked.
 - **Minimal Explanation:** Only explain complex logic or when requested.
 - **No Chatty Intros/Outros:** Meaningful content only.
+
+## Development toolchain
+
+The project requires only `docker`, `bash`, and POSIX core utilities.
+No additional tools need to be installed — `./build` encapsulates every
+`docker run` invocation needed to lint, build, test, and scan.
+
+- Use `./build` for all CI operations.
+- Do not run `brew install`, `apt install`, `apk add`, or any other host
+  package manager to obtain tools; use the `docker run` patterns in
+  `build` instead.
+- Do not search `PATH` or well-known system locations for tools not
+  already in `build`; propose adding a `docker run` invocation following
+  the existing pattern.

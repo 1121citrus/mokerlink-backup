@@ -47,3 +47,17 @@ On Linux, `docker run --device /dev/ttyUSB0` works normally.
 Never use a hardware MAC address as the MST region name in
 `start-config.cfg`.  Hardware MAC causes spanning-tree reconvergence on
 hardware swap.  Use the switch hostname instead.
+
+## Development toolchain
+
+The project requires only `docker`, `bash`, and POSIX core utilities.
+No additional tools need to be installed — `./build` encapsulates every
+`docker run` invocation needed to lint, build, test, and scan.
+
+- Use `./build` for all CI operations.
+- Do not run `brew install`, `apt install`, `apk add`, or any other host
+  package manager to obtain tools; use the `docker run` patterns in
+  `build` instead.
+- Do not search `PATH` or well-known system locations for tools not
+  already in `build`; propose adding a `docker run` invocation following
+  the existing pattern.
