@@ -102,6 +102,10 @@ clean-credentials < "${ENV}" | info
 # shellcheck disable=SC1090
 source "${ENV}"
 
+# healthcheck's grace-period check reads this marker to tell "just
+# started, first backup hasn't run yet" apart from "actually stuck".
+touch "${HEALTHCHECK_STARTUP_FILE:-/tmp/mokerlink-backup-started-at}"
+
 # Add our cron entry, and direct stdout & stderr to Docker commands stdout
 COMMAND=${COMMAND:-/usr/local/bin/backup}
 info "installing cron.d entry: ${COMMAND}"

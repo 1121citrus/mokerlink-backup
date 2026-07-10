@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+
+# supercronic stub: emit the schedule file and exit successfully.
+#
+# This lets scheduler-mode tests verify the handoff path without leaving a
+# long-running process behind in CI.
+#
+# Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+crontab_file="${1:?need crontab file}"
+
+echo "supercronic stub invoked with ${crontab_file}"
+cat "${crontab_file}"
+exit "${SUPERCRONIC_EXIT_CODE:-0}"

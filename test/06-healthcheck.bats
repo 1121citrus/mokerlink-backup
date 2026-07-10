@@ -38,6 +38,7 @@ setup() {
     script+=' && chmod 0600 /var/spool/cron/crontabs/$(id -un)'
     # shellcheck disable=SC2016
     script+=' && { supercronic /var/spool/cron/crontabs/$(id -un) & sleep 0.5; }'
+    script+=' && touch /tmp/mokerlink-backup-started-at'
     script+=' && /usr/local/bin/healthcheck'
     run run_healthcheck "${script}" \
         --tmpfs /var/spool/cron/crontabs:uid=10001,gid=10001,mode=0700
@@ -62,12 +63,31 @@ _crond_setup+=' && chmod 0600 /var/spool/cron/crontabs/$(id -un)'
 # shellcheck disable=SC2016
 _crond_setup+=' && { supercronic /var/spool/cron/crontabs/$(id -un) & sleep 0.5; }'
 
-@test "healthcheck reports healthy when no sentinel file exists" {
+@test "healthcheck reports healthy when no sentinel file but within startup grace" {
     local script="${_crond_setup}"
+    script+=' && touch /tmp/mokerlink-backup-started-at'
     script+=' && BACKUP_SENTINEL_FILE=/tmp/no-such-sentinel /usr/local/bin/healthcheck'
     run run_healthcheck "${script}" \
         --tmpfs /var/spool/cron/crontabs:uid=10001,gid=10001,mode=0700
     [ "$status" -eq 0 ]
+}
+
+@test "healthcheck reports unhealthy when no sentinel and no startup marker" {
+    local script="${_crond_setup}"
+    script+=' && BACKUP_SENTINEL_FILE=/tmp/no-such-sentinel'
+    script+=' HEALTHCHECK_STARTUP_FILE=/tmp/no-such-startup-marker /usr/local/bin/healthcheck'
+    run run_healthcheck "${script}" \
+        --tmpfs /var/spool/cron/crontabs:uid=10001,gid=10001,mode=0700
+    [ "$status" -ne 0 ]
+}
+
+@test "healthcheck reports unhealthy when no sentinel and startup grace exceeded" {
+    local script="${_crond_setup}"
+    script+=' && touch -t 202001010000 /tmp/mokerlink-backup-started-at'
+    script+=' && BACKUP_SENTINEL_FILE=/tmp/no-such-sentinel /usr/local/bin/healthcheck'
+    run run_healthcheck "${script}" \
+        --tmpfs /var/spool/cron/crontabs:uid=10001,gid=10001,mode=0700
+    [ "$status" -ne 0 ]
 }
 
 @test "healthcheck reports healthy when sentinel file is fresh" {

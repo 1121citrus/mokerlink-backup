@@ -501,12 +501,26 @@ teardown() {
 
 # ── src/bin/healthcheck ───────────────────────────────────────────────────────
 
-@test "healthcheck: exits 0 when crontab ok, supercronic mocked, no sentinel" {
+@test "healthcheck: exits 0 when crontab ok, supercronic mocked, no sentinel but within startup grace" {
+    crontab_file="/var/spool/cron/crontabs/$(id -un)"
+    printf '%s\n' '* * * * * /usr/local/bin/backup' > "${crontab_file}"
+    startup_marker="${TEST_TMPDIR}/started-at"
+    touch "${startup_marker}"
+    run env DEBUG=true PATH="${BIN_DIR}:${PATH}" \
+        HEALTHCHECK_STARTUP_FILE="${startup_marker}" \
+        bash "${BIN_DIR}/healthcheck"
+    [ "$status" -eq 0 ]
+}
+
+@test "healthcheck: exits non-zero when no sentinel and no startup marker" {
     crontab_file="/var/spool/cron/crontabs/$(id -un)"
     printf '%s\n' '* * * * * /usr/local/bin/backup' > "${crontab_file}"
     run env DEBUG=true PATH="${BIN_DIR}:${PATH}" \
+        BACKUP_SENTINEL_FILE="${TEST_TMPDIR}/no-such-sentinel" \
+        HEALTHCHECK_STARTUP_FILE="${TEST_TMPDIR}/no-such-startup-marker" \
         bash "${BIN_DIR}/healthcheck"
-    [ "$status" -eq 0 ]
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"never succeeded"* ]]
 }
 
 @test "healthcheck: exits 0 when sentinel file is fresh" {

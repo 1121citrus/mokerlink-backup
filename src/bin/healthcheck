@@ -12,6 +12,14 @@
 #   BACKUP_MAX_AGE_SECONDS Maximum acceptable age of the sentinel file in
 #                          seconds (default: 172800 = 2 days).  If the
 #                          sentinel is older than this, healthcheck exits 1.
+#   HEALTHCHECK_STARTUP_FILE
+#                          Path to the marker `startup` touches once at
+#                          container start (default:
+#                          /tmp/mokerlink-backup-started-at)
+#   HEALTHCHECK_STARTUP_GRACE_SECONDS
+#                          Seconds after container start during which a
+#                          missing backup sentinel is still healthy
+#                          (default: 900 = 15 minutes)
 #   DEBUG                  Enable debug tracing (default: false)
 #   ENV                    Env-file path (default: ~/.env)
 
@@ -31,17 +39,33 @@ is_true "${DEBUG:-false}" && set -o xtrace -o verbose
 
 function has_cronjob_run() {
     local sentinel="${BACKUP_SENTINEL_FILE:-/tmp/mokerlink-backup-last-success}"
-    # No sentinel yet: backup has not run since the container started.
-    # Treat as healthy — the first run is pending.
-    [[ -f "${sentinel}" ]] || return 0
-    local max_age="${BACKUP_MAX_AGE_SECONDS:-172800}"
-    local now mtime age
+    local now
     now=$(date +%s)
-    mtime=$(stat -c '%Y' "${sentinel}")
-    age=$(( now - mtime ))
-    if [[ "${age}" -gt "${max_age}" ]]; then
+
+    if [[ -f "${sentinel}" ]]; then
+        local max_age mtime age
+        max_age="${BACKUP_MAX_AGE_SECONDS:-172800}"
+        mtime=$(stat -c '%Y' "${sentinel}")
+        age=$(( now - mtime ))
+        [[ "${age}" -le "${max_age}" ]] && return 0
         error "last successful backup is ${age}s old (BACKUP_MAX_AGE_SECONDS=${max_age})"
     fi
+
+    # No sentinel yet: backup has not run since the container started.
+    # Only treat this as healthy within the startup grace window -- past
+    # that, a backup that has NEVER succeeded (not just one that hasn't
+    # run yet) must report unhealthy so an operator is actually alerted.
+    local startup_marker="${HEALTHCHECK_STARTUP_FILE:-/tmp/mokerlink-backup-started-at}"
+    if [[ -f "${startup_marker}" ]]; then
+        local grace started_at uptime
+        grace="${HEALTHCHECK_STARTUP_GRACE_SECONDS:-900}"
+        started_at=$(stat -c '%Y' "${startup_marker}")
+        uptime=$(( now - started_at ))
+        [[ "${uptime}" -le "${grace}" ]] && return 0
+        error "startup grace period exceeded (${uptime}s > ${grace}s) with no successful backup"
+    fi
+
+    error "backup has never succeeded and no startup marker was found"
 }
 
 function is_crond_running() {
