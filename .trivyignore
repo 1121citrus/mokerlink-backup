@@ -23,6 +23,45 @@ CVE-2026-6100
 # fix: 8.7p1-8.amzn2023.0.17 (not yet in repo)
 CVE-2026-35385
 
+# urllib3 (pip): fix version not yet published on PyPI
+# CVE-2026-44431: info disclosure via cross-origin redirects forwarding
+#   sensitive headers
+# CVE-2026-44432: DoS via excessive HTTP response decompression
+# Both fixed in urllib3 2.7.0 per Trivy's advisory DB, but 2.7.0 does not
+# exist on PyPI yet -- `pip3 install 'urllib3>=2.7.0'` fails outright
+# (highest available is 2.6.3, the version already pinned here). Remove
+# this suppression and bump the Dockerfile's urllib3 floor once 2.7.0 is
+# published: https://pypi.org/project/urllib3/#history
+CVE-2026-44431
+CVE-2026-44432
+
+# ── AL2023 packages: inherited from aws-backup-base's own .trivyignore ─────
+# (suppression is a scan-time parameter, not baked into the image, so each
+# downstream repo's own .trivyignore must list them too)
+# glib2: multiple buffer over-read / path traversal / integer underflow
+# issues — fix: 2.82.2-770.amzn2023 (not yet in repo)
+CVE-2026-58010
+CVE-2026-58011
+CVE-2026-58012
+CVE-2026-58013
+CVE-2026-58014
+CVE-2026-58015
+CVE-2026-58016
+
+# libacl: symlink traversal privilege escalation / TOCTOU — fix:
+# 2.4.0-1.amzn2023.0.1 (not yet in repo)
+CVE-2026-54369
+CVE-2026-54370
+
+# cpython (python3, python3-libs): configparser injection, tarfile
+# extractall filter bypass/DoS, unicodedata DoS, BZ2 decompression
+# out-of-bounds write — fix: 3.9.25-1.amzn2023.0.8 (not yet in repo)
+CVE-2026-0864
+CVE-2026-11940
+CVE-2026-11972
+CVE-2026-3276
+CVE-2026-9669
+
 # ── supercronic: Go stdlib 1.26.1 (needs 1.26.2) ────────────────────────────
 # supercronic v0.2.44 is the latest release and is built with Go 1.26.1.
 # The upstream project has not yet published a release compiled with Go 1.26.2.

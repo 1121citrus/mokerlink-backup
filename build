@@ -703,7 +703,7 @@ if [[ "${TEST}" == "true" ]]; then
         "${script_dir}/test/staging" \
         "${script_dir}/test/bin/"*
     if [[ -x "${script_dir}/test/run-all" ]]; then
-        (cd "${script_dir}" && env IMAGE="${full_image}:${VERSION}" TEST_SUMMARY_JSON="${TEST_SUMMARY_JSON}" run ./test/run-all)
+        (cd "${script_dir}" && IMAGE="${full_image}:${VERSION}" TEST_SUMMARY_JSON="${TEST_SUMMARY_JSON}" run ./test/run-all)
     else
     (cd "${script_dir}" && IMAGE="${full_image}:${VERSION}" run ./test/run-all)
     fi

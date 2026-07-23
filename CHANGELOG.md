@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-07-23
+
+### Security
+
+- Reviewed CVE status and documented 15 currently-unfixable HIGH severity
+  findings in `SECURITY.md`/`.trivyignore`: `CVE-2026-44431`/`CVE-2026-44432`
+  (urllib3, fix not yet published on PyPI) and the glib2/libacl/python3
+  AL2023 batch (`CVE-2026-58010`–`CVE-2026-58016`, `CVE-2026-54369`,
+  `CVE-2026-54370`, `CVE-2026-0864`, `CVE-2026-11940`, `CVE-2026-11972`,
+  `CVE-2026-3276`, `CVE-2026-9669`) already suppressed in
+  `aws-backup-base`'s own `.trivyignore` but not previously mirrored here.
+  No dependency or code changes; suppression is a scan-time parameter, not
+  inherited from the base image.
+
 ## [1.0.3] - 2026-05-05
 
 ### Added

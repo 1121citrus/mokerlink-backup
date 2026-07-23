@@ -151,7 +151,7 @@ docker buildx imagetools inspect 1121citrus/mokerlink-backup:<version> \
     --format '{{json .Provenance}}'
 ```
 
-## CVE status (last reviewed 2026-04-27)
+## CVE status (last reviewed 2026-07-23)
 
 Advisory scans are run with Grype and Docker Scout in addition to the gating
 Trivy scan.
@@ -164,7 +164,28 @@ Trivy scan.
 
 ### Open vulnerabilities
 
-None. The migration to Amazon Linux 2023 (v1.0.1, 2026-04-27) resolved all
+| CVE | Component | Severity | Status |
+| --- | --- | --- | --- |
+| CVE-2026-44431 | urllib3 (pip), currently pinned `>=2.6.3` | HIGH | Fix version 2.7.0 not yet published on PyPI; suppressed in `.trivyignore` pending upstream release |
+| CVE-2026-44432 | urllib3 (pip), currently pinned `>=2.6.3` | HIGH | Same as above |
+| CVE-2026-58010 – CVE-2026-58016 | glib2 (AL2023, inherited from `aws-backup-base`) | HIGH | Fix `2.82.2-770.amzn2023` not yet in the AL2023 repos |
+| CVE-2026-54369, CVE-2026-54370 | libacl (AL2023, inherited from `aws-backup-base`) | HIGH | Fix `2.4.0-1.amzn2023.0.1` not yet in the AL2023 repos |
+| CVE-2026-0864, CVE-2026-11940, CVE-2026-11972, CVE-2026-3276, CVE-2026-9669 | python3 / python3-libs (AL2023, inherited from `aws-backup-base`) | HIGH | Fix `3.9.25-1.amzn2023.0.8` not yet in the AL2023 repos |
+
+The urllib3 pair are information-disclosure/DoS issues in its redirect and
+decompression handling. `pip3 install 'urllib3>=2.7.0'` fails outright in CI
+(no matching distribution — highest available is 2.6.3), so the fix cannot be
+applied yet. Tracked upstream: <https://pypi.org/project/urllib3/#history>.
+Remove the `.trivyignore` suppression and bump the Dockerfile's `urllib3`
+floor as soon as 2.7.0 is published.
+
+The AL2023 batch (glib2/libacl/python3) is already documented and suppressed
+in `aws-backup-base`'s own `.trivyignore`/`SECURITY.md` (reviewed 2026-07-21);
+since Trivy suppression is a scan-time parameter rather than something baked
+into the image, this repo's own `.trivyignore` needed the same entries added
+separately. Remove them here once `aws-backup-base` reports these fixed.
+
+The migration to Amazon Linux 2023 (v1.0.1, 2026-04-27) resolved all
 previously documented Alpine-specific CVEs. CI runs Trivy, Grype, and Docker
 Scout on every push; any new findings will be tracked here.
 
