@@ -81,4 +81,11 @@ jobs:
     uses: 1121citrus/shared-github-workflows/.github/workflows/push.yml@v1
     with:
       image: 1121citrus/mokerlink-backup
+      # This job's own `if:` above already gates on staging pushes, but
+      # push.yml's branch-name tag (type=ref,event=branch) only activates
+      # when the caller also opts in via force-push -- satisfying the job
+      # condition alone isn't enough. Without this, every staging push
+      # computes zero tags and fails with "tag is needed when pushing to
+      # registry" (confirmed live, 2026-07-23).
+      force-push: true
     secrets: inherit
