@@ -2,10 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main, master, staging]
+    branches: [dev, main, master, staging]
     tags: ["v*"]
   pull_request:
-    branches: [main, master]
+    branches: [dev, main, master]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,5 +22,6 @@ jobs:
       inject-metadata: true
       test-mode: run-all-image
       test-run-all-cmd: ./test/run-all
+      test-extra-packages: python3
       trivyignore: .trivyignore
     secrets: inherit
