@@ -117,6 +117,12 @@
 
 set -euo pipefail
 
+if (( BASH_VERSINFO[0] < 4 )); then
+    printf 'build requires bash 4.0 or later (found %s)\n' \
+        "${BASH_VERSION}" >&2
+    exit 1
+fi
+
 # ---------------------------------------------------------------------------
 # Developer orientation
 #
@@ -539,7 +545,7 @@ while [[ $# -gt 0 ]]; do
             sed -n '3,/^# HELP_ENDS_HERE/p' "$0" \
                 | grep '^#' \
                 | sed 's/^# \{0,1\}//' \
-                | head -n -1
+                | awk 'NR>1{print prev} {prev=$0}'
             exit 0 ;;
         *)
             echo "Unknown option: $1" >&2
@@ -583,7 +589,17 @@ if [[ "${PUSH}" == "true" && "${VERSION}" == dev-* ]]; then
 fi
 
 # Script directory for build context and relative paths.
-script_dir=$(dirname "$(readlink -f "$0")")
+# Portable absolute-path resolver (macOS BSD readlink lacks -f).
+_portable_readlink() {
+    if command -v realpath >/dev/null 2>&1; then
+        realpath "$1"
+    elif readlink -f "$1" >/dev/null 2>&1; then
+        readlink -f "$1"
+    else
+        (cd "$(dirname "$1")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")")
+    fi
+}
+script_dir=$(dirname "$(_portable_readlink "$0")")
 
 if [[ "${CACHE_RESET_TRIVY}" == "true" ]]; then
     echo "==> Cache: reset Trivy DB" >&2
@@ -842,7 +858,8 @@ if [[ "${SCAN_SCOUT}" == "true" ]]; then
         run docker scout cves "${full_image}:${VERSION}"
     else
         set +e
-        _scout_out=$(docker scout cves "${full_image}:${VERSION}" 2>&1)
+        _scout_out=$(docker scout cves --exit-code --only-severity critical,high \
+            "${full_image}:${VERSION}" 2>&1)
         _scout_status=$?
         set -e
         if [[ ${_scout_status} -ne 0 ]] \
