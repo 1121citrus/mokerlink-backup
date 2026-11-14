@@ -1,4 +1,5 @@
 name: gitleaks CI
+# Generator: build-generate
 
 on:
   workflow_dispatch:
@@ -15,13 +16,54 @@ permissions:
 jobs:
   gitleaks:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Run gitleaks scan
+        env:
+          GITLEAKS_EVENT: ${{ github.event_name }}
+          GITLEAKS_BEFORE: ${{ github.event.before }}
+          GITLEAKS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITLEAKS_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITLEAKS_CONFIG: ""
         run: |
-          docker run --rm \
-            -v "$PWD:/repo" \
-            zricethezav/gitleaks:v8.24.2 \
+          set -o errexit -o nounset -o pipefail
+
+          case "${GITLEAKS_EVENT}" in
+            pull_request)
+              [[ -n "${GITLEAKS_BASE_SHA}" && -n "${GITLEAKS_HEAD_SHA}" ]] || {
+                echo "gitleaks: pull request base/head SHA is missing" >&2
+                exit 1
+              }
+              log_range="${GITLEAKS_BASE_SHA}..${GITLEAKS_HEAD_SHA}"
+              ;;
+            push)
+              [[ -n "${GITLEAKS_BEFORE}" ]] || {
+                echo "gitleaks: push before SHA is missing" >&2
+                exit 1
+              }
+              if [[ "${GITLEAKS_BEFORE}" =~ ^0+$ ]]; then
+                log_range="${GITHUB_SHA}"
+              else
+                log_range="${GITLEAKS_BEFORE}..${GITHUB_SHA}"
+              fi
+              ;;
+            *)
+              log_range="${GITHUB_SHA}"
+              ;;
+          esac
+
+          gitleaks_args=(
               git /repo --no-banner --redact --exit-code 1
+              "--log-opts=--full-history ${log_range}"
+          )
+          if [[ -n "${GITLEAKS_CONFIG}" ]]; then
+            gitleaks_args+=(--config "/repo/${GITLEAKS_CONFIG}")
+          fi
+          docker run --rm \
+              -v "$PWD:/repo" \
+              "zricethezav/gitleaks:v8.30.1" "${gitleaks_args[@]}"
