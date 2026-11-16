@@ -3,49 +3,25 @@
 # All entries below have been reviewed and are unfixable at this time.
 # Each is documented in SECURITY.md with the rationale and a tracking reference.
 #
-# ── urllib3 (pip 2.6.3): fix requires 2.7.0, not yet installable ─────────────
-# urllib3 2.7.0 released but not available via pip 21.3.1 inside AL2023;
-# the dnf python3-urllib3 RPM (1.25.10) has no AL2023 RPM fix either.
-# Suppressed until both pip and the AL2023 repo ship compatible versions.
+# Pruned 2026-11-15: every AL2023 OS-package, python3-pip RPM, and
+# supercronic Go stdlib entry was removed after `dnf upgrade
+# --releasever=latest` and the digest-pinned aws-backup-base 1.2.2 cleared
+# them (verified with an unsuppressed `trivy image --ignore-unfixed
+# --severity HIGH,CRITICAL` scan). Only findings with no installable fix
+# remain.
+#
+# ── urllib3 (pip 2.6.3): fix requires 2.7.0 (Python >= 3.10) ───────────────
+# urllib3 2.7.0 declares requires_python ">=3.10"; the base image ships
+# Python 3.9, and awscli-2 2.38.0 also pins urllib3 <= 2.6.3. The dnf
+# python3-urllib3 RPM (1.25.10) has no AL2023 RPM fix either.
 CVE-2026-44431
 CVE-2026-44432
 
-# ── python3-pip (RPM): fix 21.3.1-2.amzn2023.0.19 not yet in AL2023 repo ────
-CVE-2026-6357
-
-# ── AL2023 packages: fix versions not yet available in the AL2023 repo ───────
-# glibc: DoS via iconv() — fix: 2.34-231.amzn2023.0.4
-CVE-2026-4046
-
-# cpython: incomplete control-char validation in http.cookies
-# fix: python3 3.9.25-1.amzn2023.0.5
-CVE-2026-3644
-
-# cpython: arbitrary code execution via command injection in webbrowser.open()
-# fix: python3 3.9.25-1.amzn2023.0.5
-CVE-2026-4786
-
-# cpython: arbitrary code execution/info disclosure via use-after-free in
-# decompression — fix: python3 3.9.25-1.amzn2023.0.5
-CVE-2026-6100
-
-# openssh/openssh-clients: privilege escalation via scp legacy protocol
-# fix: 8.7p1-8.amzn2023.0.17
-CVE-2026-35385
-
-# ── supercronic: Go stdlib (needs ≥1.26.3) ───────────────────────────────────
-# supercronic is embedded in the aws-backup-base image; fixing requires a base
-# image rebuild.  Suppressed until aws-backup-base ships supercronic compiled
-# with Go ≥1.26.3.
-# Tracked: https://github.com/aptible/supercronic/releases
-CVE-2026-32280
-CVE-2026-32281
-CVE-2026-32282
-CVE-2026-32283
-CVE-2026-33810
-CVE-2026-33811
-CVE-2026-33814
-CVE-2026-39820
-CVE-2026-39836
-CVE-2026-42499
-CVE-2026-42501
+# ── urllib3 (pip 2.6.3): fix requires 2.8.0 (Python >= 3.10) ───────────────
+# Added 2026-11-15. CVE-2026-97687 (HTTPS-proxy TLS configuration override)
+# and CVE-2026-97689 (chunk-parser memory DoS) are fixed only in urllib3
+# 2.8.0, whose PyPI metadata declares requires_python ">=3.10" (verified
+# 2026-11-15). The base image ships Python 3.9, so no installable fix
+# exists. Same root cause as CVE-2026-44431. See SECURITY.md.
+CVE-2026-97687
+CVE-2026-97689

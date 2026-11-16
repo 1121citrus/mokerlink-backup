@@ -83,3 +83,22 @@ setup() {
     run grep -E '^USER ' "${DOCKERFILE}"
     [ "$status" -eq 0 ]
 }
+
+@test "every dnf install/upgrade/reinstall uses --releasever=latest" {
+    # AL2023 locks dnf to the base image's release; without the flag
+    # `dnf upgrade` cannot reach security fixes published since then.
+    run grep -E 'dnf (install|upgrade|reinstall) ' "${DOCKERFILE}"
+    [ "$status" -eq 0 ]
+    run grep -E 'dnf (install|upgrade|reinstall) ' "${DOCKERFILE}"
+    ! printf '%s\n' "$output" | grep -v -- '--releasever=latest'
+}
+
+@test "Dockerfile performs a full dnf upgrade against the latest release" {
+    run grep -E 'dnf upgrade -y --quiet --releasever=latest \\$' "${DOCKERFILE}"
+    [ "$status" -eq 0 ]
+}
+
+@test "base image is pinned by sha256 digest" {
+    run grep -E '^ARG BASE_IMAGE=1121citrus/aws-backup-base@sha256:[0-9a-f]{64}$' "${DOCKERFILE}"
+    [ "$status" -eq 0 ]
+}

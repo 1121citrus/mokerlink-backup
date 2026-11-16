@@ -6,7 +6,10 @@
 # Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-ARG BASE_IMAGE=1121citrus/aws-backup-base:latest
+# aws-backup-base 1.2.2 (AL2023 2023.12.20261021, supercronic v0.2.49 built
+# with Go 1.27.3), pinned by multi-arch index digest so builds are
+# reproducible rather than tracking whatever `:latest` points at.
+ARG BASE_IMAGE=1121citrus/aws-backup-base@sha256:280e9ec4a1996b6bf7720ceed9add0f7fcd619b99b840e06869cf81bb58dfae0
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_DATE=unknown
@@ -43,9 +46,13 @@ LABEL org.opencontainers.image.title="mokerlink-backup" \
 # Install required utilities and configure environment.
 # bzip3 and pixz are not available in AL2023; gzip, bzip2, xz, lzop, and pigz
 # cover all common backup compression scenarios.
+# AL2023 locks dnf to the base image's release version, so a plain
+# `dnf upgrade` cannot reach security fixes published after the base image
+# was built.  `--releasever=latest` resolves against the newest AL2023
+# repository snapshot so every installed package picks up current fixes.
 # hadolint ignore=DL3013,DL3041
 RUN set -eux; \
-    dnf install -y --quiet \
+    dnf install -y --quiet --releasever=latest \
         bzip2 \
         expect \
         gnupg2 \
@@ -67,8 +74,8 @@ RUN set -eux; \
         'zipp>=3.19.1' \
     && pip3 install --no-cache-dir --upgrade --ignore-installed \
         'setuptools>=78.1.1' \
-    && dnf upgrade -y --quiet \
-    && dnf reinstall -y --quiet python3-urllib3 \
+    && dnf upgrade -y --quiet --releasever=latest \
+    && dnf reinstall -y --quiet --releasever=latest python3-urllib3 \
     && useradd \
         --create-home --shell /sbin/nologin \
         --uid "${UID}" mokerlink-backup \

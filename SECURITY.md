@@ -151,26 +151,43 @@ docker buildx imagetools inspect 1121citrus/mokerlink-backup:<version> \
     --format '{{json .Provenance}}'
 ```
 
-## CVE status (last reviewed 2026-05-17)
+## CVE status (last reviewed 2026-11-15)
 
-Three scanners run on every build:
+Three scanners run on every build. The posture below reflects the pinned
+`aws-backup-base` 1.2.2 digest
+`sha256:280e9ec4a1996b6bf7720ceed9add0f7fcd619b99b840e06869cf81bb58dfae0`.
 
 | Scanner | Role | Blocks build? |
 | --- | --- | --- |
 | Trivy | Gating (`--exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL`) | Yes |
-| Grype | Advisory (full severity, informational output) | No |
-| Docker Scout | Advisory (full severity, informational output) | No |
+| Grype | Full severity, informational output (no `fail-on-severity`) | No |
+| Docker Scout | Gating (`--exit-code --only-severity critical,high`), added by the generator regeneration in `f0dc9e9` | Yes |
 
 ### Trivy (gating scan)
 
 | Result | Notes |
 | --- | --- |
-| **0 vulnerabilities** | All findings are either absent, unfixed upstream (suppressed by `--ignore-unfixed`), or explicitly accepted in `.trivyignore`. |
+| **0 vulnerabilities** | Passes after `.trivyignore` suppression of the four pip `urllib3` entries below. Without suppression, those four are the only HIGH/CRITICAL findings (verified 2026-11-15). |
+
+### Docker Scout (gating scan) — currently failing
+
+As of 2026-11-15 Scout reports 60 HIGH findings, none of which has an
+installable fix (details in the sections below):
+
+- 46 against `perl-*` subpackages (`CVE-2023-31484`, `CVE-2023-31486`):
+  false positives, see "perl" below.
+- 7 against the RPM `urllib3` 1.25.10 and 3 against the RPM `setuptools`
+  59.6.0: no AL2023 RPM fix, and both RPMs are required by `awscli-2`.
+- 4 against the pip `urllib3` 2.6.3: the fix needs Python >= 3.10.
+
+Scout has no repository-local suppression file that `build` reads (unlike
+`.trivyignore` for Trivy), so the build exits non-zero at Stage 4c until
+either a VEX/exception mechanism is added to the generated `build` or the
+base image moves to Python >= 3.10.
 
 ### Open vulnerabilities — accepted and documented
 
-The entries below appear in Grype and/or Scout but cannot be fixed at this time.
-Each one is logged in `.trivyignore` with a rationale comment.
+The entries below cannot be fixed at this time.
 
 #### urllib3 — RPM version 1.25.10 (system package)
 
@@ -187,63 +204,62 @@ available in the AL2023 repository.
 | CVE-2025-66471 | HIGH | Data amplification | 2.6.0 (no RPM fix) |
 | CVE-2026-21441 | HIGH | Data amplification | 2.6.3 (no RPM fix) |
 | CVE-2026-44431 | HIGH | Sensitive info exposure | 2.7.0 (no RPM fix) |
+| CVE-2026-97687 | HIGH | HTTPS-proxy TLS configuration override | 2.8.0 (no RPM fix) |
+| CVE-2026-97689 | HIGH | Unbounded memory allocation in chunk parser | 2.8.0 (no RPM fix) |
+
+`awscli-2` 2.38.0 requires `python3.9dist(urllib3) <= 2.6.3`, so the RPM
+cannot be removed or replaced. No newer RPM exists even with
+`dnf --releasever=latest` (checked 2026-11-15).
 
 #### urllib3 — pip version 2.6.3
 
-| CVE | Severity | Description | Fix version | Status |
-| --- | --- | --- | --- | --- |
-| CVE-2026-44431 | HIGH | Sensitive info exposure | 2.7.0 | urllib3 2.7.0 not installable with pip 21.3.1 in AL2023 |
-| CVE-2026-44432 | HIGH | Data amplification | 2.7.0 | Same — awaiting compatible pip/package release |
-
-#### python3-pip — RPM version 21.3.1-2.amzn2023.0.16
+`urllib3` 2.7.0 and 2.8.0 both declare `requires_python: ">=3.10"` (PyPI
+metadata, verified 2026-11-15); the base image ships Python 3.9. All four
+are suppressed in `.trivyignore`.
 
 | CVE | Severity | Description | Fix version | Status |
 | --- | --- | --- | --- | --- |
-| CVE-2026-6357 | HIGH | Arbitrary code execution | 21.3.1-2.amzn2023.0.19 | Fix identified; not yet available in the AL2023 dnf repository |
+| CVE-2026-44431 | HIGH | Sensitive info exposure | 2.7.0 | Requires Python >= 3.10 |
+| CVE-2026-44432 | HIGH | Data amplification | 2.7.0 | Requires Python >= 3.10 |
+| CVE-2026-97687 | HIGH | HTTPS-proxy TLS configuration override | 2.8.0 | Requires Python >= 3.10; suppressed 2026-11-15. The image uses no HTTPS proxy |
+| CVE-2026-97689 | HIGH | Unbounded memory allocation in chunk parser | 2.8.0 | Requires Python >= 3.10; suppressed 2026-11-15 |
 
-#### AL2023 OS packages — fix versions identified but not yet in repo
+#### setuptools — RPM version 59.6.0 (system package)
 
-These packages have known fix versions in the ALAS advisory database but the
-patched packages are not yet available via `dnf` in the AL2023 repository used
-by this image's base layer. All are suppressed in `.trivyignore`.
+Scout reports `CVE-2022-40897`, `CVE-2024-6345`, and `CVE-2025-47273` (HIGH)
+against the RPM copy. `python3-setuptools` is required by
+`python3-ruamel-yaml` and `python3-distro` (both `awscli-2` dependencies);
+no AL2023 RPM fix exists. The pip copy under `/usr/local` (`setuptools`
+>= 78.1.1) is not affected.
 
-| CVE | Severity | Component | Fix version |
-| --- | --- | --- | --- |
-| CVE-2026-4046 | HIGH | `glibc` | 2.34-231.amzn2023.0.4 |
-| CVE-2026-35385 | HIGH | `openssh`, `openssh-clients` | 8.7p1-8.amzn2023.0.17 |
-| CVE-2026-3644 | HIGH | `python3`, `python3-libs` | 3.9.25-1.amzn2023.0.5 |
-| CVE-2026-4786 | HIGH | `python3`, `python3-libs` | 3.9.25-1.amzn2023.0.5 |
-| CVE-2026-6100 | HIGH | `python3`, `python3-libs` | 3.9.25-1.amzn2023.0.5 |
+#### supercronic — Go stdlib (inherited from base image)
 
-#### supercronic — Go stdlib vulnerabilities (inherited from base image)
+`aws-backup-base` 1.2.2 builds `supercronic` v0.2.49 with Go 1.27.3; Trivy
+reports no findings. Grype reports `GO-2026-6859` (severity unknown, fixed
+in Go 1.27.4); it clears when `aws-backup-base` is rebuilt.
 
-`supercronic` is a statically-linked binary compiled with Go 1.26.2 and
-embedded in the `aws-backup-base` image. These CVEs require rebuilding
-supercronic with Go ≥1.26.3. They cannot be patched by changes to this
-Dockerfile. All are suppressed in `.trivyignore`.
+#### perl — false positives (Scout only)
 
-| CVE | Severity | Description |
-| --- | --- | --- |
-| CVE-2026-32280 — CVE-2026-33810 | HIGH | Go stdlib batch (previously documented) |
-| CVE-2026-33811 | HIGH | `LookupCNAME` cgo DNS resolver issue |
-| CVE-2026-33814 | HIGH | HTTP/2 SETTINGS frame processing DoS |
-| CVE-2026-39820 | HIGH | `ParseAddress`/`ParseAddressList` input handling |
-| CVE-2026-39836 | HIGH | `Dial`/`LookupPort` panic on NUL byte |
-| CVE-2026-42499 | HIGH | `consumePhrase` DoS via pathological input |
-| CVE-2026-42501 | HIGH | Go stdlib issue (Go ≥1.26.3 required) |
-
-Tracked: <https://github.com/aptible/supercronic/releases>
-
-#### perl — legacy CVEs (advisory scanners only)
-
-`perl` is pulled in as a transitive dnf dependency. These CVEs appear in Grype
-and Scout but Trivy does not flag them (no unfixed annotation in the AL2023 DB).
-A `dnf update perl` would install the patched version if it becomes available.
+`perl` is inherited from `aws-backup-base`. Scout compares each `perl-*`
+subpackage's own version (for example `perl-base` `2.27-477.amzn2023.0.11`)
+against the `perl` source-package fix (`5.32.1-477.amzn2023.0.4` / `.0.5`).
+The installed release `477.amzn2023.0.11` is already newer than both.
 
 | CVE | Severity | Fix version |
 | --- | --- | --- |
 | CVE-2023-31484 | HIGH | 5.32.1-477.amzn2023.0.4 |
 | CVE-2023-31486 | HIGH | 5.32.1-477.amzn2023.0.5 |
+
+### Resolved 2026-11-15
+
+`dnf install`/`upgrade`/`reinstall` now run with `--releasever=latest`, and
+the base image is pinned by digest (`aws-backup-base` 1.2.2) instead of
+`:latest`. This cleared 55 gating Trivy HIGH findings in AL2023 packages
+without suppression (`curl-minimal`/`libcurl-minimal`, `cyrus-sasl-lib`,
+`glibc`, `libcap`, `pcre2`, `python3`/`python3-libs`, `rpm`, `sqlite-libs`,
+and related subpackages). Every earlier AL2023 OS-package, `python3-pip`
+RPM, and `supercronic` Go stdlib suppression was removed from
+`.trivyignore`: the installed packages and binary now contain the fixes.
 
 ### Remediated vulnerabilities
 

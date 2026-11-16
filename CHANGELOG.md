@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Run every `dnf install`/`upgrade`/`reinstall` in the `Dockerfile` with
+  `--releasever=latest`. AL2023 locks dnf to the base image's release, so
+  `dnf upgrade` could not reach newer fixes.
+- Pin `aws-backup-base` by digest (1.2.2,
+  `sha256:280e9ec4...b58dfae0`) instead of `:latest`, so builds are
+  reproducible.
+- Together these clear 55 gating Trivy HIGH findings in AL2023 packages
+  (including `curl-minimal`) without suppression.
+- Prune every now-unneeded AL2023 OS-package, `python3-pip` RPM, and
+  `supercronic` Go stdlib entry from `.trivyignore`.
+- Suppress `CVE-2026-97687`/`CVE-2026-97689` (`urllib3` 2.6.3, HIGH):
+  the fix (`urllib3` 2.8.0) requires Python >= 3.10 and the base image
+  ships Python 3.9.
+- Document in `SECURITY.md` that the gating Docker Scout stage still fails
+  on 60 HIGH findings with no installable fix (`perl` false positives and
+  RPM/pip `urllib3`/`setuptools` copies required by `awscli-2`).
+- Add static `Dockerfile` regression tests for `--releasever=latest` and the
+  digest-pinned base image.
+
 ## [1.0.3] - 2026-05-05
 
 ### Added
