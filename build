@@ -154,6 +154,10 @@ CACHE_SKIP_UPDATE_TRIVY=false
 CACHE_SKIP_UPDATE_GRYPE=false
 CACHE_WARN_DAYS=${BUILD_CACHE_WARN_DAYS:-1}
 DRY_RUN=false
+# Set by a failed gating scan (Stage 4/4c) so advisory stages still run and
+# the final exit code still reflects the failure; checked before Stage 6.
+_gate_failed=0
+_gate_exit=0
 BUILD_REPORT_JSON=${BUILD_REPORT_JSON:-}
 LINT=${BUILD_LINT:-true}
 PLATFORMS=${BUILD_PLATFORM:-linux/amd64,linux/arm64}
@@ -791,7 +795,11 @@ if [[ "${SCAN}" == "true" ]]; then
 
     _trivy_db_flags=(--skip-db-update --skip-java-db-update)
 
-    run docker run --rm \
+    # Deferred exit: a non-zero status here would otherwise trip
+    # `set -e` and abort the whole script, skipping Grype, Scout, and
+    # every advisory stage that follows. Record the failure instead and
+    # keep going; the saved status still fails the build at the very end.
+    if ! run docker run --rm \
         -v "${_scan_tar}:/scan.tar:ro" \
         -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
         -v "${script_dir}/.trivyignore:/.trivyignore:ro" \
@@ -804,7 +812,10 @@ if [[ "${SCAN}" == "true" ]]; then
             --severity HIGH,CRITICAL \
             --timeout 5m \
             "${_trivy_db_flags[@]}" \
-            --input /scan.tar
+            --input /scan.tar; then
+        _gate_failed=1
+        _gate_exit=1
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -862,12 +873,26 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "${SCAN_SCOUT}" == "true" ]]; then
     echo "==> Stage 4c: Scan (Scout) ${full_image}:${VERSION}" >&2
+
+    # Scout has no repository-local ignorefile like Trivy's .trivyignore or
+    # Grype's .grype.yaml; a VEX document is its equivalent. Only load it
+    # when present and scope it to this repo's image name (no tag), so one
+    # static file covers every VERSION this script ever builds — see
+    # SECURITY.md.
+    _scout_vex=()
+    if [[ -f "${script_dir}/.scout.vex.json" ]]; then
+        _scout_vex=(
+            --vex-location "${script_dir}/.scout.vex.json"
+            --vex-author "1121 Citrus Avenue"
+        )
+    fi
+
     if [[ "${DRY_RUN}" == "true" ]]; then
-        run docker scout cves "${full_image}:${VERSION}"
+        run docker scout cves "${_scout_vex[@]}" "${full_image}:${VERSION}"
     else
         set +e
         _scout_out=$(docker scout cves --exit-code --only-severity critical,high \
-            "${full_image}:${VERSION}" 2>&1)
+            "${_scout_vex[@]}" "${full_image}:${VERSION}" 2>&1)
         _scout_status=$?
         set -e
         if [[ ${_scout_status} -ne 0 ]] \
@@ -877,7 +902,10 @@ if [[ "${SCAN_SCOUT}" == "true" ]]; then
         else
             echo "${_scout_out}" >&2
             if [[ ${_scout_status} -ne 0 ]]; then
-                exit "${_scout_status}"
+                # Deferred exit: see the matching comment on Stage 4 (Trivy)
+                # above. Advisory stages and Grype still need to run.
+                _gate_failed=1
+                _gate_exit="${_scout_status}"
             fi
         fi
     fi
@@ -1001,6 +1029,12 @@ fi
 # Only runs when --push is specified; rebuilds for all target platforms.
 # ---------------------------------------------------------------------------
 if [[ "${PUSH}" == "true" ]]; then
+    if [[ "${_gate_failed}" == "1" ]]; then
+        echo "    Error: refusing to push — a gating scan (Trivy or Scout)" \
+             "failed earlier; see Stage 4/4c output above" >&2
+        exit "${_gate_exit}"
+    fi
+
     echo "==> Stage 6: Push ${full_image}:${VERSION} (${PLATFORMS})" >&2
 
     # For push, include :latest on releases and :dev-latest on dev builds.
@@ -1040,6 +1074,13 @@ if [[ "${PUSH}" == "true" ]]; then
     else
         "${push_cmd[@]}"
     fi
+fi
+
+if [[ "${_gate_failed}" == "1" ]]; then
+    echo "" >&2
+    echo "FAILED: ${full_image}:${VERSION} — a gating scan reported findings" \
+         "(see Stage 4/4c output above)" >&2
+    exit "${_gate_exit}"
 fi
 
 echo "" >&2

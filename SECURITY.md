@@ -171,19 +171,55 @@ Three scanners run on every build. The posture below reflects the pinned
 
 ### Docker Scout (gating scan) — currently failing
 
-As of 2026-11-15 Scout reports 60 HIGH findings, none of which has an
-installable fix (details in the sections below):
+Scout has no repository-local ignorefile like `.trivyignore` or
+`.grype.yaml`. `.scout.vex.json` (an OpenVEX document) is now its
+equivalent: `build` Stage 4c passes it via `--vex-location` together with
+`--vex-author "1121 Citrus Avenue"` whenever the file exists. It currently
+suppresses only the `perl-*` false positives below (46 of the 60 HIGH
+findings), verified by rerunning the exact Stage 4c command before and
+after adding it:
 
 - 46 against `perl-*` subpackages (`CVE-2023-31484`, `CVE-2023-31486`):
-  false positives, see "perl" below.
+  false positives, see "perl" below — **suppressed as of 2026-11-24**.
 - 7 against the RPM `urllib3` 1.25.10 and 3 against the RPM `setuptools`
-  59.6.0: no AL2023 RPM fix, and both RPMs are required by `awscli-2`.
-- 4 against the pip `urllib3` 2.6.3: the fix needs Python >= 3.10.
+  59.6.0: no AL2023 RPM fix, and both RPMs are required by `awscli-2` —
+  **not suppressed**.
+- 4 against the pip `urllib3` 2.6.3: the fix needs Python >= 3.10 — **not
+  suppressed**.
 
-Scout has no repository-local suppression file that `build` reads (unlike
-`.trivyignore` for Trivy), so the build exits non-zero at Stage 4c until
-either a VEX/exception mechanism is added to the generated `build` or the
-base image moves to Python >= 3.10.
+As of 2026-11-24 this leaves 14 genuine HIGH findings (down from 60), so
+`docker scout cves --exit-code --only-severity critical,high` still exits
+2 and Stage 4c still fails the build — correctly, since none of those 14
+has an installable fix yet. The remaining 2 CVE IDs are deliberately
+*not* added to `.scout.vex.json`: unlike the perl entries, they are
+genuinely-present, accepted-risk findings, not false positives, and
+OpenVEX's `not_affected` status asserts the former. Misusing it for the
+latter would make the scan lie about the image's actual posture; Scout is
+expected to keep failing here until the base image reaches Python >= 3.10
+or AL2023 ships fixed RPMs.
+
+The product scope in `.scout.vex.json` is the bare image name
+(`pkg:docker/1121citrus/mokerlink-backup`, no `@version`/tag) rather than
+an image+tag pair, confirmed by testing both forms directly against this
+image: a tagged purl (e.g. `@dev-7bd363f`) only matches that exact tag,
+while the bare form matches every tag. `VERSION` changes on every build
+(`dev-<short-sha>`), so a tag-scoped statement would need editing on every
+commit; the bare form is the only one that stays valid without touching
+the file again.
+
+#### `build` no longer aborts on a gating-scan failure
+
+Before 2026-11-24, a failing Trivy or Scout exit code propagated straight
+through `set -euo pipefail` (Trivy) or an explicit `exit` (Scout),
+terminating the script immediately — skipping Grype, every later
+advisory stage (Dive, Coverage, Metrics, Churn), and giving no way to see
+their output on a run that also happens to fail the gate. `build` now
+records a failing Trivy/Scout status in `_gate_failed`/`_gate_exit`
+instead of exiting there: Grype and every advisory stage still run,
+Stage 6 Push still refuses to run (checked explicitly, since it would
+otherwise be unguarded), and the script still exits with the original
+gating status code at the very end. A gating failure still fails the
+build — it just no longer hides everything after it.
 
 ### Open vulnerabilities — accepted and documented
 

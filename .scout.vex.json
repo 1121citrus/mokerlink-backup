@@ -1,0 +1,35 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/1121citrus/mokerlink-backup/security/vex/perl-false-positive",
+  "author": "1121 Citrus Avenue <security@1121citrus.invalid>",
+  "timestamp": "2026-11-24T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2023-31484"
+      },
+      "products": [
+        {
+          "@id": "pkg:docker/1121citrus/mokerlink-backup"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Scout compares each perl-* subpackage's own release (e.g. perl-base 2.27-477.amzn2023.0.11) against the perl source-package fix version (5.32.1-477.amzn2023.0.4), not against the matching release suffix. The installed release (.0.11) is already newer than the fix (.0.4); the fixed code is present. See SECURITY.md 'perl - false positives'."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2023-31486"
+      },
+      "products": [
+        {
+          "@id": "pkg:docker/1121citrus/mokerlink-backup"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Same false positive as CVE-2023-31484, compared against fix version 5.32.1-477.amzn2023.0.5 instead of .0.4. The installed release (.0.11) is already newer. See SECURITY.md 'perl - false positives'."
+    }
+  ]
+}
