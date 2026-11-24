@@ -39,7 +39,7 @@
 #                       --advise after --no-scan to keep them.
 #   --advise [ADVISEMENTS]
 #                       Run advisory scans. Comma-delimited list:
-#                       'churn', 'coverage', 'dive', 'metrics', 'security',
+#                       'churn', 'coverage', 'dive', 'metrics',
 #                       'all', 'none', or any combination.
 #                       'all' selects every available advisement.
 #                       'none' disables all (equivalent to --no-advise).
@@ -867,8 +867,9 @@ if [[ "${SCAN_GRYPE}" == "true" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Stage 4c: Scan (Docker Scout — gating)
-# Runs Docker Scout CVE scan.  Exit code blocks the build.
+# Stage 4c: Scan (Docker Scout — gating, with a reviewed-finding allowlist)
+# Runs Docker Scout CVE scan. Blocks the build only on a HIGH/CRITICAL
+# finding that is not listed in .scoutignore (see the comment below).
 # Skips cleanly if the scout-cli plugin image is unavailable.
 # ---------------------------------------------------------------------------
 if [[ "${SCAN_SCOUT}" == "true" ]]; then
@@ -887,6 +888,21 @@ if [[ "${SCAN_SCOUT}" == "true" ]]; then
         )
     fi
 
+    # .scoutignore holds CVE/GHSA ids that have been reviewed and accepted
+    # (blessed) as currently unfixable — see SECURITY.md. Scout has no
+    # native ignorefile, so its own report is filtered against this list
+    # here instead of trusting its --exit-code: a blessed finding must
+    # not fail the build, but a new, unreviewed one still must.
+    _scout_ignore_ids=()
+    if [[ -f "${script_dir}/.scoutignore" ]]; then
+        while IFS= read -r _scout_ignore_line; do
+            _scout_ignore_line="${_scout_ignore_line%%#*}"
+            _scout_ignore_line="${_scout_ignore_line//[[:space:]]/}"
+            [[ -n "${_scout_ignore_line}" ]] \
+                && _scout_ignore_ids+=("${_scout_ignore_line}")
+        done < "${script_dir}/.scoutignore"
+    fi
+
     if [[ "${DRY_RUN}" == "true" ]]; then
         run docker scout cves "${_scout_vex[@]}" "${full_image}:${VERSION}"
     else
@@ -902,10 +918,36 @@ if [[ "${SCAN_SCOUT}" == "true" ]]; then
         else
             echo "${_scout_out}" >&2
             if [[ ${_scout_status} -ne 0 ]]; then
-                # Deferred exit: see the matching comment on Stage 4 (Trivy)
-                # above. Advisory stages and Grype still need to run.
-                _gate_failed=1
-                _gate_exit="${_scout_status}"
+                _scout_found_ids=$(grep -E '✗ (HIGH|CRITICAL)' <<< "${_scout_out}" \
+                    | grep -oE '(CVE-[0-9]{4}-[0-9]+|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})' \
+                    | sort -u || true)
+                _scout_unblessed=()
+                while IFS= read -r _scout_id; do
+                    [[ -z "${_scout_id}" ]] && continue
+                    _scout_blessed=false
+                    for _scout_ignored in "${_scout_ignore_ids[@]}"; do
+                        if [[ "${_scout_id}" == "${_scout_ignored}" ]]; then
+                            _scout_blessed=true
+                            break
+                        fi
+                    done
+                    [[ "${_scout_blessed}" == "false" ]] \
+                        && _scout_unblessed+=("${_scout_id}")
+                done <<< "${_scout_found_ids}"
+
+                if [[ "${#_scout_unblessed[@]}" -gt 0 ]]; then
+                    echo "    Scout: unreviewed HIGH/CRITICAL finding(s)," \
+                         "not in .scoutignore: ${_scout_unblessed[*]}" >&2
+                    # Deferred exit: see the matching comment on Stage 4
+                    # (Trivy) above. Advisory stages and Grype still need
+                    # to run.
+                    _gate_failed=1
+                    _gate_exit="${_scout_status}"
+                else
+                    echo "    Scout: every HIGH/CRITICAL finding is" \
+                         "reviewed and accepted in .scoutignore;" \
+                         "not failing the build" >&2
+                fi
             fi
         fi
     fi

@@ -1,0 +1,38 @@
+# .scoutignore — Docker Scout CVEs reviewed and accepted (blessed) as
+# currently unfixable. Applied to Scout's own report by `build` Stage 4c
+# (Scout has no native ignorefile, unlike Trivy's --ignorefile or Grype's
+# --config). One CVE/GHSA id per line; '#' starts a comment.
+#
+# Every entry here is documented in SECURITY.md, including why it has no
+# installable fix today. Unlike `.scout.vex.json` (reserved for verified
+# false positives — a VEX `not_affected` statement asserts the finding
+# does not apply at all), these are genuine, currently-present findings
+# that this project has reviewed and chosen not to block the build on.
+# Review this list whenever `aws-backup-base` is bumped or the AL2023
+# repository gains a newer python3-urllib3/python3-setuptools build —
+# the fix may already exist upstream even though Scout still reports it.
+#
+# Added 2026-11-24, verified against the aws-backup-base 1.2.3 pin.
+
+# urllib3 (RPM python3-urllib3 1.25.10): no AL2023 RPM fix; awscli-2 pins
+# python3.9dist(urllib3) <= 2.6.3, so the RPM cannot be upgraded or removed.
+CVE-2021-33503
+CVE-2023-43804
+CVE-2025-66418
+CVE-2025-66471
+CVE-2026-21441
+
+# urllib3 (RPM 1.25.10 and pip-installed 2.6.3, both affected): the next
+# urllib3 releases (2.7.0, 2.8.0) declare requires_python ">=3.10"; the
+# base image ships Python 3.9.
+CVE-2026-44431
+CVE-2026-44432
+CVE-2026-97687
+CVE-2026-97689
+
+# setuptools (RPM python3-setuptools 59.6.0): no AL2023 RPM fix;
+# python3-ruamel-yaml and python3-distro (both awscli-2 dependencies)
+# require it.
+CVE-2022-40897
+CVE-2024-6345
+CVE-2025-47273
