@@ -151,11 +151,11 @@ docker buildx imagetools inspect 1121citrus/mokerlink-backup:<version> \
     --format '{{json .Provenance}}'
 ```
 
-## CVE status (last reviewed 2026-11-15)
+## CVE status (last reviewed 2026-11-24)
 
 Three scanners run on every build. The posture below reflects the pinned
-`aws-backup-base` 1.2.2 digest
-`sha256:280e9ec4a1996b6bf7720ceed9add0f7fcd619b99b840e06869cf81bb58dfae0`.
+`aws-backup-base` 1.2.3 digest
+`sha256:dc4c176e47b9d1b818c149466bcb61ed2e5ea643a0d947d6b8fc8519b2b14852`.
 
 | Scanner | Role | Blocks build? |
 | --- | --- | --- |
@@ -230,13 +230,33 @@ Scout reports `CVE-2022-40897`, `CVE-2024-6345`, and `CVE-2025-47273` (HIGH)
 against the RPM copy. `python3-setuptools` is required by
 `python3-ruamel-yaml` and `python3-distro` (both `awscli-2` dependencies);
 no AL2023 RPM fix exists. The pip copy under `/usr/local` (`setuptools`
->= 78.1.1) is not affected.
+>= 78.1.1) is not affected by these three.
+
+#### setuptools — both copies, Medium/Low (Grype only)
+
+Grype additionally reports two findings against *both* the RPM
+(59.6.0) and pip (82.0.1) copies, verified 2026-11-24:
+
+| CVE / Advisory | Severity | Fixed version | Status |
+| --- | --- | --- | --- |
+| GHSA-h35f-9h28-mq5c | Medium | 83.0.0 | Requires Python >= 3.10 |
+| GHSA-xmj3-9gf7-h52w | Low | 84.1.0 | Requires Python >= 3.10 |
+
+82.0.1 is the newest `setuptools` release whose PyPI metadata permits
+Python 3.9 (verified 2026-11-24 by attempting `pip install setuptools` on
+the base image's interpreter: 82.0.1 resolves, 83.0.0/84.1.0 do not). The
+RPM has no newer AL2023 build either (`dnf list --showduplicates
+python3-setuptools` tops out at 59.6.0-2.amzn2023.0.6). Both suppressed in
+`.grype.yaml`; not reported by Trivy (below its HIGH/CRITICAL gate) or the
+`.trivyignore` suppression list.
 
 #### supercronic — Go stdlib (inherited from base image)
 
-`aws-backup-base` 1.2.2 builds `supercronic` v0.2.49 with Go 1.27.3; Trivy
-reports no findings. Grype reports `GO-2026-6859` (severity unknown, fixed
-in Go 1.27.4); it clears when `aws-backup-base` is rebuilt.
+`aws-backup-base` 1.2.3 builds `supercronic` v0.2.49 with Go 1.27.4,
+resolving the 10 Go `stdlib` findings reported against the 1.2.2-pinned
+Go 1.27.3 build: 8 HIGH (`CVE-2026-97033` through `-97039`, `-97043`) and
+2 Medium (`CVE-2026-97054`, `GO-2026-6859`). See "Resolved 2026-11-24"
+below.
 
 #### perl — false positives (Scout only)
 
@@ -261,6 +281,37 @@ and related subpackages). Every earlier AL2023 OS-package, `python3-pip`
 RPM, and `supercronic` Go stdlib suppression was removed from
 `.trivyignore`: the installed packages and binary now contain the fixes.
 
+### Resolved 2026-11-24
+
+Two independent fixes, verified with an unsuppressed `grype
+docker-archive:...` scan before and after (23 findings → 10):
+
+- Bumped `BASE_IMAGE` from `aws-backup-base` 1.2.2 to 1.2.3
+  (`sha256:dc4c176e47b9d1b818c149466bcb61ed2e5ea643a0d947d6b8fc8519b2b14852`).
+  1.2.3 builds `supercronic` with Go 1.27.4 instead of 1.27.3, resolving
+  all 10 Go `stdlib` findings described under "supercronic" above, and
+  excludes the `python3-pygments` RPM (an unused optional dependency of
+  `python3-prompt-toolkit`), resolving Medium `GHSA-mrwq-x4v8-fh7p`
+  (pygments 2.7.4 → needs 2.15.0).
+- Added `dnf remove -y python3-pip` to the end of the Dockerfile's `RUN`
+  instruction, after every `pip3 install` step that needs it. Nothing in
+  `src/` or `test/` invokes `pip`/`pip3` at runtime — it is a build-time
+  tool only — and `dnf remove`'s dry run
+  (`dnf remove -y --assumeno python3-pip`) confirmed it has no reverse
+  dependencies in this image, so removing it does not cascade into
+  removing `python3-setuptools`, `python3-urllib3`, or any other RPM.
+  This resolves the Medium `pip` 21.3.1 findings `GHSA-qwm4-qh6w-59xr`
+  and `GHSA-58qw-9mgm-455v` (both require pip >= 26.1, unavailable as an
+  AL2023 RPM) and shrinks the final image from 229 MB to 179 MB.
+
+Pruned `.grype.yaml` of its 17 stale entries: 15 Alpine `apk`-type entries
+left over from before the Alpine → AL2023 migration (v1.0.1), plus 2
+`python`-type entries (`wheel`, `jaraco-context`) for packages vendored
+inside the now-removed `python3-pip`. None of those packages exist in the
+image any more. Replaced with the 10 genuinely unfixed findings (`urllib3`
+×6, `setuptools` ×4 — see the sections above) so the advisory scan's own
+suppression list matches what it would otherwise report.
+
 ### Remediated vulnerabilities
 
 | CVE / Advisory | Component | Remediation |
@@ -274,6 +325,9 @@ RPM, and `supercronic` Go stdlib suppression was removed from
 | GHSA-4xh5-x5gv-qwph, CVE-2025-8869 | pip | Upgraded to pip≥25.3 (via `aws-backup-base`) |
 | GHSA-jfmj-5v4g-7637, CVE-2024-5569 | zipp (pip) | Pinned `zipp>=3.19.1` in Dockerfile |
 | CVE-2022-40897, CVE-2024-6345, CVE-2025-47273 | setuptools | Installed `setuptools>=78.1.1` via pip `--ignore-installed` to override RPM 59.6.0 |
+| 8 HIGH `CVE-2026-97033`–`-97039`/`-97043`, 2 Medium `CVE-2026-97054`/`GO-2026-6859` | supercronic Go stdlib | Bumped `BASE_IMAGE` to `aws-backup-base` 1.2.3 (Go 1.27.4 builder) |
+| GHSA-mrwq-x4v8-fh7p | pygments | Bumped `BASE_IMAGE` to `aws-backup-base` 1.2.3 (excludes `python3-pygments` RPM) |
+| GHSA-qwm4-qh6w-59xr, GHSA-58qw-9mgm-455v | pip (RPM, build-time only) | Added `dnf remove -y python3-pip` after the Dockerfile's `pip3 install` steps |
 
 ### Test suite status
 

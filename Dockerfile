@@ -6,10 +6,11 @@
 # Copyright (C) 2025 James Hanlon [mailto:jim@hanlonsoftware.com]
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# aws-backup-base 1.2.2 (AL2023 2023.12.20261021, supercronic v0.2.49 built
-# with Go 1.27.3), pinned by multi-arch index digest so builds are
-# reproducible rather than tracking whatever `:latest` points at.
-ARG BASE_IMAGE=1121citrus/aws-backup-base@sha256:280e9ec4a1996b6bf7720ceed9add0f7fcd619b99b840e06869cf81bb58dfae0
+# aws-backup-base 1.2.3 (AL2023 2023.12.20261102, supercronic v0.2.49 built
+# with Go 1.27.4, python3-pygments excluded), pinned by multi-arch index
+# digest so builds are reproducible rather than tracking whatever `:latest`
+# points at.
+ARG BASE_IMAGE=1121citrus/aws-backup-base@sha256:dc4c176e47b9d1b818c149466bcb61ed2e5ea643a0d947d6b8fc8519b2b14852
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_DATE=unknown
@@ -76,6 +77,7 @@ RUN set -eux; \
         'setuptools>=78.1.1' \
     && dnf upgrade -y --quiet --releasever=latest \
     && dnf reinstall -y --quiet --releasever=latest python3-urllib3 \
+    && dnf remove -y --quiet --releasever=latest python3-pip \
     && useradd \
         --create-home --shell /sbin/nologin \
         --uid "${UID}" mokerlink-backup \
