@@ -90,7 +90,6 @@
 #              a) Dive       — image layer analysis
 #              b) Coverage   — kcov line-coverage report
 #              f) Metrics    — scc code-metrics summary
-#              g) Security   — graudit pattern scan
 #              h) Churn      — code-maat revision analysis
 #   6.  Push      — multi-platform rebuild + push (only with --push)
 #
@@ -147,7 +146,6 @@ SCAN_SCOUT=${BUILD_SCAN_SCOUT:-true}
 ADVISE_CHURN=false
 ADVISE_DIVE=false
 ADVISE_METRICS=false
-ADVISE_SECURITY=false
 ADVISE_COVERAGE=false
 _ADVISE_EXPLICIT=false   # set true when --advise or --no-advise is passed
 CACHE_RESET_TRIVY=false
@@ -494,7 +492,6 @@ while [[ $# -gt 0 ]]; do
             ADVISE_CHURN=false
             ADVISE_DIVE=false
             ADVISE_METRICS=false
-            ADVISE_SECURITY=false
             ADVISE_COVERAGE=false
             IFS=',' read -ra adv_list <<< "$advisements"
             for adv in "${adv_list[@]}"; do
@@ -505,19 +502,16 @@ while [[ $# -gt 0 ]]; do
                     coverage) ADVISE_COVERAGE=true ;;
                     dive)     ADVISE_DIVE=true ;;
                     metrics)  ADVISE_METRICS=true ;;
-                    security) ADVISE_SECURITY=true ;;
                     all)
                         ADVISE_CHURN=true
                         ADVISE_DIVE=true
                         ADVISE_METRICS=true
-                        ADVISE_SECURITY=true
                         ADVISE_COVERAGE=true
                         ;;
                     none)
                         ADVISE_CHURN=false
                         ADVISE_DIVE=false
                         ADVISE_METRICS=false
-                        ADVISE_SECURITY=false
                         ADVISE_COVERAGE=false
                         ;;
                     *)  echo "Unknown advisement: $adv" >&2; exit 1 ;;
@@ -528,7 +522,6 @@ while [[ $# -gt 0 ]]; do
             ADVISE_CHURN=false
             ADVISE_DIVE=false
             ADVISE_METRICS=false
-            ADVISE_SECURITY=false
             ADVISE_COVERAGE=false
             _ADVISE_EXPLICIT=true
             ;;
@@ -559,7 +552,6 @@ if [[ "${SCAN}" == "false" && "${_ADVISE_EXPLICIT}" == "false" ]]; then
     ADVISE_CHURN=false
     ADVISE_DIVE=false
     ADVISE_METRICS=false
-    ADVISE_SECURITY=false
     ADVISE_COVERAGE=false
 fi
 
@@ -758,19 +750,26 @@ fi
 
 # ---------------------------------------------------------------------------
 # Stage 4a: Prime Trivy DB (ensure DB exists before scan)
+# The DB download is the scan's only network dependency, so it is retried
+# a fixed number of times with a fixed delay and stops on first success.
+# Stage 4 fails with a clear message if the DB is still missing.
 # ---------------------------------------------------------------------------
 if [[ "${SCAN}" == "true" ]]; then
     if [[ "${CACHE_SKIP_UPDATE_TRIVY}" != "true" ]]; then
         if ! volume_has_file "${TRIVY_CACHE_VOLUME}" "/cache/db/trivy.db"; then
             echo "==> Stage 4a: Prime Trivy DB" >&2
             echo "    Priming Trivy DB cache (first run)" >&2
-            # Prime the DB in a separate step to handle network errors gracefully.
-            if ! run docker run --rm \
-                -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
-                "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
-                    --quiet --download-db-only; then
-                echo "    Warning: could not initialize Trivy DB cache; scan may be slow" >&2
-            fi
+            for _attempt in 1 2 3; do
+                run docker run --rm \
+                    -v "${TRIVY_CACHE_VOLUME}:/root/.cache/trivy" \
+                    "${TRIVY_IMAGE}:${TRIVY_TAG}" image \
+                        --quiet --download-db-only --timeout 10m \
+                    && break
+                echo "    Trivy DB download failed (attempt ${_attempt}/3)" >&2
+                if [[ "${_attempt}" -lt 3 ]]; then
+                    sleep 15
+                fi
+            done
         fi
     fi
 fi
@@ -780,6 +779,15 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "${SCAN}" == "true" ]]; then
     echo "==> Stage 4: Scan ${full_image}:${VERSION}" >&2
+
+    # The scan runs with --skip-db-update, which Trivy rejects when no DB
+    # is cached. Fail with the real cause instead of Trivy's message.
+    if [[ "${DRY_RUN}" != "true" ]] \
+        && ! volume_has_file "${TRIVY_CACHE_VOLUME}" "/cache/db/trivy.db"; then
+        echo "    Error: no Trivy vulnerability DB is cached, so the gating scan cannot run" >&2
+        echo "    Check network access to mirror.gcr.io, then rerun the build" >&2
+        exit 1
+    fi
 
     _trivy_db_flags=(--skip-db-update --skip-java-db-update)
 
@@ -959,38 +967,6 @@ if [[ "${ADVISE_METRICS}" == "true" ]]; then
         -v "${script_dir}:/data:ro" \
         "${SCC_IMAGE}:${SCC_TAG}" \
         scc --by-file /data >&2 || true
-fi
-
-# ---------------------------------------------------------------------------
-# Stage 5g: Advise (graudit — security pattern scan)
-# Clones graudit at runtime, scans src/ with bash+strings signatures.
-# Results printed to stderr.  Never blocks the build.
-# ---------------------------------------------------------------------------
-if [[ "${ADVISE_SECURITY}" == "true" ]]; then
-    echo "==> Stage 5g: Advise (security) ${full_image}:${VERSION}" >&2
-    _graudit_tmp=$(mktemp -d /tmp/graudit-XXXXXX)
-    # shellcheck disable=SC2064
-    trap "rm -rf '${_graudit_tmp}'" EXIT
-    if git clone --quiet --depth 1 \
-            https://github.com/wireghoul/graudit.git \
-            "${_graudit_tmp}/graudit" >&2; then
-        _shim_dir="${_graudit_tmp}/shim"
-        mkdir -p "${_shim_dir}"
-        _real_grep=$(command -v grep)
-        printf '#!/bin/sh\nexec "%s" --exclude-dir=node_modules --exclude-dir=__pycache__ --exclude-dir=.venv "$@"\n' \
-            "${_real_grep}" > "${_shim_dir}/grep"
-        printf '#!/bin/sh\nexec "%s" -E --exclude-dir=node_modules --exclude-dir=__pycache__ --exclude-dir=.venv "$@"\n' \
-            "${_real_grep}" > "${_shim_dir}/egrep"
-        chmod +x "${_shim_dir}/grep" "${_shim_dir}/egrep"
-        PATH="${_shim_dir}:${PATH}" \
-            "${_graudit_tmp}/graudit/graudit" \
-                -d bash -d strings \
-                "${script_dir}/src" >&2 || true
-    else
-        echo "    Security scan skipped: graudit clone failed" >&2
-    fi
-    rm -rf "${_graudit_tmp}"
-    trap - EXIT
 fi
 
 # ---------------------------------------------------------------------------
