@@ -7,3 +7,4 @@
 # Commit only *.cfg.example (generic templates with no real values).
 *.cfg
 !*.cfg.example
+.envrc
