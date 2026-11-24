@@ -1,0 +1,187 @@
+SYSTEM CONFIG FILE ::= BEGIN
+! System Description: KT-NOS POE-G244GSM Switch
+! System Version: v1.0.0.34
+! System Name: switch-example
+!
+! Sanitized fixture for test/14-cfg-to-commands.bats' full-roundtrip
+! checks. Structure (9 vlans, 1 spanning-tree block, 28 interfaces =
+! 38 exits) mirrors a real production export; every identifying value
+! (IP, contact, vlan/interface names) is a generic placeholder. Do not
+! replace this with a real switch export -- see start-config.cfg.example
+! and .gitignore's *.cfg rule for why.
+system name "switch-example"
+system location "example-location"
+system contact "admin@example.com"
+!
+ip address 192.168.2.1 mask 255.255.255.0
+! ip dhcp
+ip telnet
+ip ssh
+ip http session-timeout 60
+ip https session-timeout 60
+!
+clock source sntp
+sntp host 192.168.2.254 port 123
+!
+snmp
+!
+vlan 10
+ name "vlan-10"
+vlan 20
+ name "vlan-20"
+vlan 30
+ name "vlan-30"
+vlan 40
+ name "vlan-40"
+vlan 50
+ name "vlan-50"
+! vlan 60
+!  name "future (60)"
+! vlan 70
+!  name "future (70)"
+! vlan 80
+!  name "future (80)"
+! vlan 90
+!  name "future (90)"
+vlan 100
+ name "vlan-100"
+vlan 101
+ name "vlan-101"
+vlan 110
+ name "vlan-110"
+vlan 120
+ name "vlan-120"
+!
+voice-vlan oui-table 00:E0:BB "3COM"
+voice-vlan oui-table 00:03:6B "Cisco"
+voice-vlan oui-table 00:E0:75 "Veritel"
+voice-vlan oui-table 00:D0:1E "Pingtel"
+voice-vlan oui-table 00:01:E3 "Siemens"
+voice-vlan oui-table 00:60:B9 "NEC/Philips"
+voice-vlan oui-table 00:0F:E2 "H3C"
+voice-vlan oui-table 00:09:6E "Avaya"
+!
+logging aggregation aging-time 3600
+logging file
+!
+spanning-tree mst configuration
+ name "example-network-spanning-tree-mst"
+!
+interface gi1
+ description "example-ap-1"
+ switchport trunk allowed vlan add 10,20,30,40,50,100-101,110,120
+!
+interface gi2
+ description "example-uplink-1"
+ switchport trunk native vlan 10
+!
+interface gi3
+ description "example-ap-2"
+ switchport trunk allowed vlan add 10,20,30,40,50,100-101,110,120
+!
+interface gi4
+ description "example-device (vlan 40)"
+ switchport trunk native vlan 40
+!
+interface gi5
+ description "example-ap-3"
+ switchport trunk allowed vlan add 10,20,30,40,50,100-101,110,120
+!
+interface gi6
+ description "example-device (vlan 40)"
+ switchport trunk native vlan 40
+!
+interface gi7
+ description "example-ap-4"
+ switchport trunk allowed vlan add 10,20,30,40,50,100-101,110,120
+!
+interface gi8
+ description "example-device (vlan 40)"
+ switchport trunk native vlan 40
+!
+interface gi9
+ description "example-device-1"
+ switchport trunk native vlan 40
+!
+interface gi10
+ description "example-device-2"
+ switchport trunk native vlan 40
+!
+interface gi11
+ description "example-device-3 (disconnected)"
+ switchport trunk native vlan 40
+!
+interface gi12
+ description "example-device-4"
+ switchport trunk native vlan 40
+!
+interface gi13
+ description "example-device-5"
+ switchport trunk native vlan 40
+!
+interface gi14
+ description "example-device-6"
+ switchport trunk native vlan 40
+!
+interface gi15
+ description "(unlabeled)"
+ switchport trunk native vlan 40
+!
+interface gi16
+ description "example-device-7"
+ switchport trunk native vlan 40
+!
+interface gi17
+ description "example-device-8"
+ switchport trunk native vlan 40
+!
+interface gi18
+ description "example-device (vlan 40)"
+ switchport trunk native vlan 40
+!
+interface gi19
+ description "example-hub-1"
+ switchport trunk native vlan 101
+!
+interface gi20
+ description "example-device (vlan 40)"
+ switchport trunk native vlan 40
+!
+interface gi21
+ description "example-device (vlan 40)"
+ switchport trunk native vlan 40
+!
+interface gi22
+ description "example-coordinator-1"
+ switchport trunk native vlan 40
+!
+interface gi23
+ description "example-bridge-1"
+ switchport trunk native vlan 40
+!
+interface gi24
+ description "example-device (vlan 40)"
+ switchport trunk native vlan 40
+!
+interface gi25
+ description "example-device (vlan 20)"
+ switchport trunk native vlan 20
+!
+interface gi26
+ description "example-device (vlan 50)"
+ switchport trunk native vlan 50
+!
+interface gi27
+ description "example-trunk (vlan 1)"
+!
+interface gi28
+ description "example-firewall-uplink"
+ switchport trunk allowed vlan add 10,20,30,40,50,100-101,110,120
+!
+line console
+ exec-timeout 60
+line telnet
+ exec-timeout 60
+line ssh
+ exec-timeout 60
+!
