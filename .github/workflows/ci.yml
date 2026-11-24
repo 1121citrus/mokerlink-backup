@@ -24,4 +24,10 @@ jobs:
       test-run-all-cmd: ./test/run-all
       test-extra-packages: python3
       trivyignore: .trivyignore
+      # pipeline.yml's push stage only runs on v* tags unless force-push
+      # opts the branch build in too -- staging pushes a branch, not a
+      # tag, so without this every staging push computes zero tags and
+      # fails with "tag is needed when pushing to registry". Scoped to
+      # staging only so dev/main branch pushes don't also publish.
+      force-push: ${{ github.ref == 'refs/heads/staging' }}
     secrets: inherit
