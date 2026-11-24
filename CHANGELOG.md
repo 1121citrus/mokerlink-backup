@@ -7,26 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-11-24
+
 ### Security
 
 - Run every `dnf install`/`upgrade`/`reinstall` in the `Dockerfile` with
   `--releasever=latest`. AL2023 locks dnf to the base image's release, so
   `dnf upgrade` could not reach newer fixes.
-- Pin `aws-backup-base` by digest (1.2.2,
-  `sha256:280e9ec4...b58dfae0`) instead of `:latest`, so builds are
-  reproducible.
-- Together these clear 55 gating Trivy HIGH findings in AL2023 packages
-  (including `curl-minimal`) without suppression.
+- Pin `aws-backup-base` by digest, bumped from 1.2.2 to 1.2.3
+  (`sha256:dc4c176e47b9d1b818c149466bcb61ed2e5ea643a0d947d6b8fc8519b2b14852`)
+  instead of `:latest`, so builds are reproducible. 1.2.3 builds
+  `supercronic` with Go 1.27.4 instead of 1.27.3 and excludes the
+  `python3-pygments` RPM, clearing 10 Go `stdlib` CVEs and
+  `GHSA-mrwq-x4v8-fh7p` (pygments).
+- Together the digest pin and `--releasever=latest` clear 55 gating
+  Trivy HIGH findings in AL2023 packages (including `curl-minimal`)
+  without suppression.
 - Prune every now-unneeded AL2023 OS-package, `python3-pip` RPM, and
   `supercronic` Go stdlib entry from `.trivyignore`.
 - Suppress `CVE-2026-97687`/`CVE-2026-97689` (`urllib3` 2.6.3, HIGH):
   the fix (`urllib3` 2.8.0) requires Python >= 3.10 and the base image
   ships Python 3.9.
-- Document in `SECURITY.md` that the gating Docker Scout stage still fails
-  on 60 HIGH findings with no installable fix (`perl` false positives and
-  RPM/pip `urllib3`/`setuptools` copies required by `awscli-2`).
+- Remove `python3-pip` from the image after the `Dockerfile`'s `pip3
+  install` steps run; it is build-time tooling only — nothing in `src/`
+  or `test/` calls `pip`/`pip3` at runtime. Clears the `pip` 21.3.1
+  Medium findings `GHSA-qwm4-qh6w-59xr` and `GHSA-58qw-9mgm-455v` and
+  shrinks the image from 229 MB to 179 MB.
+- Add `.scout.vex.json`, an OpenVEX document suppressing the two
+  `perl-*` CVEs (`CVE-2023-31484`, `CVE-2023-31486`) Docker Scout
+  reports as false positives — it compares each subpackage's own
+  release against the wrong `perl` source-package fix version.
+- Add `.scoutignore`, listing the 12 Docker Scout findings (`urllib3`
+  on both the RPM 1.25.10 and pip 2.6.3 copies, `setuptools` on the RPM
+  59.6.0 copy) reviewed and accepted as currently unfixable, blocked by
+  the base image's Python 3.9. `build` Stage 4c now checks Scout's
+  findings against this list instead of trusting its own `--exit-code`,
+  so a reviewed finding no longer fails the build.
+- Prune 17 stale Alpine-era entries from `.grype.yaml` left over from
+  before the Alpine -> AL2023 migration (v1.0.1); replace with the
+  10 findings genuinely still unfixed on the current base (`urllib3`
+  x6, `setuptools` x4).
+- Document two new Grype-only findings against `setuptools`
+  (`GHSA-h35f-9h28-mq5c` Medium, `GHSA-xmj3-9gf7-h52w` Low), blocked by
+  the same Python 3.9 constraint.
 - Add static `Dockerfile` regression tests for `--releasever=latest` and the
   digest-pinned base image.
+
+### Changed
+
+- `build`: a failing Trivy or Docker Scout gating scan no longer aborts
+  the script immediately. The failure is now recorded and the script
+  continues through Grype and every advisory stage that was requested;
+  Stage 6 Push still refuses to run, and the script still exits with
+  the original failing status at the end.
 
 ## [1.0.3] - 2026-05-05
 
@@ -111,7 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.0...v1.0.1
