@@ -282,7 +282,7 @@ Scout reports `CVE-2022-40897`, `CVE-2024-6345`, and `CVE-2025-47273` (HIGH)
 against the RPM copy. `python3-setuptools` is required by
 `python3-ruamel-yaml` and `python3-distro` (both `awscli-2` dependencies);
 no AL2023 RPM fix exists. The pip copy under `/usr/local` (`setuptools`
->= 78.1.1) is not affected by these three.
+>= 82.0.1) is not affected by these three.
 
 #### setuptools — both copies, Medium/Low (Grype only)
 
@@ -370,13 +370,13 @@ suppression list matches what it would otherwise report.
 | --- | --- | --- |
 | Alpine APK CVEs (multiple) | `python3`, `busybox`, `openssh`, `unzip`, `py3-urllib3`, `py3-cryptography`, `py3-pip` | Resolved by migrating base image from Alpine 3.22 to AL2023 (v1.0.1) |
 | CVE-2026-32280 — CVE-2026-33810 | supercronic Go stdlib | Partially resolved: `aws-backup-base` ships supercronic v0.2.45 (Go ≥1.26.2); newer batch of Go stdlib CVEs (33811, 33814, 39820, 39836, 42499, 42501) added to `.trivyignore` pending Go ≥1.26.3 release |
-| GHSA-r6ph-v2qm-q3c2, CVE-2026-26007 | cryptography (pip) | Pinned `cryptography>=46.0.5` in Dockerfile |
+| GHSA-r6ph-v2qm-q3c2, CVE-2026-26007 | cryptography (pip) | Set `cryptography>=50.0.2` in Dockerfile |
 | GHSA-gm62-xv2j-4w53 + 3 others | urllib3 (pip) | Pinned `urllib3>=2.6.3` in Dockerfile |
 | GHSA-8rrh-rw8j-w5fx, CVE-2026-24049 | wheel (pip) | Pinned `wheel>=0.46.2` in Dockerfile |
 | GHSA-58pv-8j8x-9vj2 | jaraco.context (pip) | Pinned `jaraco.context>=6.1.0` in Dockerfile |
 | GHSA-4xh5-x5gv-qwph, CVE-2025-8869 | pip | Upgraded to pip≥25.3 (via `aws-backup-base`) |
-| GHSA-jfmj-5v4g-7637, CVE-2024-5569 | zipp (pip) | Pinned `zipp>=3.19.1` in Dockerfile |
-| CVE-2022-40897, CVE-2024-6345, CVE-2025-47273 | setuptools | Installed `setuptools>=78.1.1` via pip `--ignore-installed` to override RPM 59.6.0 |
+| GHSA-jfmj-5v4g-7637, CVE-2024-5569 | zipp (pip) | Set `zipp>=3.23.1` in Dockerfile |
+| CVE-2022-40897, CVE-2024-6345, CVE-2025-47273 | setuptools | Installed `setuptools>=82.0.1` via pip `--ignore-installed` to override RPM 59.6.0 |
 | 8 HIGH `CVE-2026-97033`–`-97039`/`-97043`, 2 Medium `CVE-2026-97054`/`GO-2026-6859` | supercronic Go stdlib | Bumped `BASE_IMAGE` to `aws-backup-base` 1.2.3 (Go 1.27.4 builder) |
 | GHSA-mrwq-x4v8-fh7p | pygments | Bumped `BASE_IMAGE` to `aws-backup-base` 1.2.3 (excludes `python3-pygments` RPM) |
 | GHSA-qwm4-qh6w-59xr, GHSA-58qw-9mgm-455v | pip (RPM, build-time only) | Added `dnf remove -y python3-pip` after the Dockerfile's `pip3 install` steps |

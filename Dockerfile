@@ -51,6 +51,8 @@ LABEL org.opencontainers.image.title="mokerlink-backup" \
 # `dnf upgrade` cannot reach security fixes published after the base image
 # was built.  `--releasever=latest` resolves against the newest AL2023
 # repository snapshot so every installed package picks up current fixes.
+# Install newer IDNA and setuptools alongside their RPMs without removing
+# the system-managed files.
 # hadolint ignore=DL3013,DL3041
 RUN set -eux; \
     dnf install -y --quiet --releasever=latest \
@@ -67,14 +69,15 @@ RUN set -eux; \
         xz \
         zip \
     && pip3 install --no-cache-dir --upgrade \
-        'cryptography>=46.0.5' \
+        'cryptography>=50.0.2' \
         'jaraco.context>=6.1.0' \
         'tftpy>=0.8.0' \
         'urllib3>=2.6.3' \
         'wheel>=0.46.2' \
-        'zipp>=3.19.1' \
+        'zipp>=3.23.1' \
     && pip3 install --no-cache-dir --upgrade --ignore-installed \
-        'setuptools>=78.1.1' \
+        'idna>=3.20' \
+        'setuptools>=82.0.1' \
     && dnf upgrade -y --quiet --releasever=latest \
     && dnf reinstall -y --quiet --releasever=latest python3-urllib3 \
     && dnf remove -y --quiet --releasever=latest python3-pip \

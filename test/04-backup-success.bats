@@ -32,6 +32,33 @@ teardown() {
     fi
 }
 
+@test "AWS CLI initializes with updated IDNA on Python 3.9" {
+    run docker run --rm --network none --read-only \
+        -e AWS_EC2_METADATA_DISABLED=true \
+        -e AWS_CONFIG_FILE=/dev/null \
+        -e AWS_SHARED_CREDENTIALS_FILE=/dev/null \
+        --entrypoint /usr/bin/python3 "${IMAGE}" -c '
+import sys
+from awscli.clidriver import create_clidriver
+from importlib.metadata import version
+from urllib3.util.url import parse_url
+
+assert sys.version_info[:2] == (3, 9)
+assert tuple(map(int, version("idna").split(".")[:2])) >= (3, 20)
+assert parse_url("https://b\u00fccher.example").host == "xn--bcher-kva.example"
+assert create_clidriver().main(
+    ["s3api", "list-buckets", "--generate-cli-skeleton", "input"]
+) == 0
+'
+    [ "$status" -eq 0 ]
+}
+
+@test "system IDNA package files remain intact" {
+    run docker run --rm --network none --read-only \
+        --entrypoint /usr/bin/rpm "${IMAGE}" --verify python3-idna
+    [ "$status" -eq 0 ]
+}
+
 @test "no-compression backup begins and finishes" {
     local output
     output=$(run_backup -e COMPRESSION=none)

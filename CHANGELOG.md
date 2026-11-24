@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Raise the Python 3.9-compatible minimums for `cryptography` to
+  50.0.2, `setuptools` to 82.0.1, and `zipp` to 3.23.1.
+- Install `idna` 3.20 or later for Python 3.9. The system RPM remains
+  installed for the Amazon Linux package dependencies.
+
 ## [1.0.4] - 2026-11-24
 
 ### Security
