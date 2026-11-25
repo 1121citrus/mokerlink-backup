@@ -729,7 +729,7 @@ if [[ "${RUN_STAGING}" == "true" ]]; then
     if [[ ! -x "${script_dir}/test/staging" ]]; then
         echo "    SKIP: test/staging not found or not executable" >&2
     else
-        (cd "${script_dir}" && run env STAGING_SUMMARY_JSON="${STAGING_SUMMARY_JSON}" ./test/staging)
+        (cd "${script_dir}" && run env IMAGE="${full_image}:${VERSION}" STAGING_SUMMARY_JSON="${STAGING_SUMMARY_JSON}" ./test/staging)
     fi
     write_build_report
 fi
