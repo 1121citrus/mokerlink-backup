@@ -190,14 +190,32 @@ _aws_available() {
 
 # _host_available — return 0 if a live network target is configured AND
 # reachable.  Requires HOST to be non-empty (set via --host) and responds
-# on TCP port 22 within 1 second.  Tests are skipped rather than failed
-# when the host is set but unreachable (e.g. switch is offline).
+# on TCP port 22 within HOST_PROBE_TIMEOUT seconds (default 1).  Tests are
+# skipped rather than failed when the host is set but unreachable (e.g.
+# switch is offline).
 # Used by _meets_requirement for host/switch/pfsense/network requirement tokens.
 # Args: none
 _host_available() {
     [[ -n "${HOST:-}" ]] || return 1
-    # Probe SSH port; suppress all output (bash /dev/tcp does not use tools).
-    (: > "/dev/tcp/${HOST}/22") 2>/dev/null
+    local _timeout="${HOST_PROBE_TIMEOUT:-1}"
+    # Probe SSH port in the background; suppress all output (bash /dev/tcp
+    # does not use external tools). A *refused* connection fails fast, but
+    # a *filtered* port (SYN silently dropped) can block far longer than
+    # ${_timeout}s with no enforced bound of its own -- poll in 0.1s steps
+    # and kill the probe once the budget is spent, so a filtered port is
+    # treated the same as an unreachable one instead of hanging the run.
+    (: > "/dev/tcp/${HOST}/22") 2>/dev/null &
+    local _probe_pid=$! _waited=0
+    while kill -0 "${_probe_pid}" 2>/dev/null; do
+        if (( _waited >= _timeout * 10 )); then
+            kill "${_probe_pid}" 2>/dev/null
+            wait "${_probe_pid}" 2>/dev/null
+            return 1
+        fi
+        sleep 0.1
+        _waited=$((_waited + 1))
+    done
+    wait "${_probe_pid}"
 }
 
 # ---------------------------------------------------------------------------
