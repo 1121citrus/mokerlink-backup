@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.5] - 2026-11-25
 
 ### Changed
 
@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   50.0.2, `setuptools` to 82.0.1, and `zipp` to 3.23.1.
 - Install `idna` 3.20 or later for Python 3.9. The system RPM remains
   installed for the Amazon Linux package dependencies.
+
+### Fixed
+
+- `build`: Stage 3d (`--run-staging`) now passes `IMAGE` to
+  `test/staging`, matching Stage 3's `test/run-all` invocation.
+  Previously the stage failed in setup with "IMAGE is not set" even
+  after a successful build, because `test/staging` never received the
+  image it was meant to test.
 
 ## [1.0.4] - 2026-11-24
 
@@ -151,7 +159,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.4...HEAD
+[1.0.5]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/1121citrus/mokerlink-backup/compare/v1.0.1...v1.0.2
